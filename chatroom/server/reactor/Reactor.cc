@@ -93,5 +93,6 @@ void Reactor ::handleRead(Connection* conn) {
     if (data.empty()) {
         return;
     }
-    std::cout << data << std::endl;
+    auto js = JsonProtocol::decode(data);
+    ChatService::instance().handle(conn, js);
 }

@@ -3,7 +3,7 @@
 
 class TcpServer {
    public:
-    TcpServer(uint16_t port);
+    explicit TcpServer(uint16_t port);
     ~TcpServer();
     bool start();
     int acceptCli();

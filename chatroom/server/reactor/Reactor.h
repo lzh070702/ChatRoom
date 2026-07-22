@@ -4,6 +4,8 @@
 #include <mutex>
 #include <vector>
 #include "../net/Connection.h"
+#include "../protocol/JsonProtocol.h"
+#include "../service/ChatService.h"
 
 class Reactor {
    public:
