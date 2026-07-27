@@ -1,8 +1,9 @@
-#include "Reactor.h"
 #include <fcntl.h>
 #include <sys/eventfd.h>
 #include <unistd.h>
 #include <iostream>  ////////////////////////////
+
+#include "Reactor.h"
 
 Reactor::Reactor() {
     m_epfd = epoll_create1(0);
@@ -40,7 +41,7 @@ void Reactor ::loop() {
 
 void Reactor ::pushFd(int fd) {
     {
-        std::unique_lock<std::mutex> lock(m_mtx);
+        std::lock_guard<std::mutex> lock(m_mtx);
         m_cds.push_back(fd);
     }
     uint64_t u = 1;
@@ -62,13 +63,13 @@ void Reactor ::handleWakeup() {
     epoll_event ev{};
     std::vector<int> cfds;
     {
-        std::unique_lock<std::mutex> lock(m_mtx);
+        std::lock_guard<std::mutex> lock(m_mtx);
         cfds.swap(m_cds);
     }
     for (const auto& fd : cfds) {
         fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
         ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
-        Connection* conn = new Connection(fd);
+        Connection* conn = new Connection(fd, this);
         ev.data.ptr = conn;
         if (epoll_ctl(m_epfd, EPOLL_CTL_ADD, fd, &ev) == 0) {
             m_conn_cnt++;
@@ -80,6 +81,8 @@ void Reactor ::handleWakeup() {
 
 void Reactor ::handleClose(Connection* conn) {
     epoll_ctl(m_epfd, EPOLL_CTL_DEL, conn->getFd(), nullptr);
+    ChatService::instance().logout(conn);
+    conn->setUserId(-1);
     delete conn;
     m_conn_cnt--;
 }
@@ -93,6 +96,16 @@ void Reactor ::handleRead(Connection* conn) {
     if (data.empty()) {
         return;
     }
-    auto js = JsonProtocol::decode(data);
+    auto js = json::parse(data);
     ChatService::instance().handle(conn, js);
+}
+
+void Reactor ::handleWrite(Connection* conn, const std::string& data) {
+    if (data.empty()) {
+        return;
+    }
+    if (!conn->sendData(data)) {
+        handleClose(conn);
+        return;
+    }
 }

@@ -20,7 +20,7 @@ bool UserModel::insert(User& user) {
 bool UserModel::queryByEmail(const std::string& email, User& user) {
     char sql[1024] = {0};
     snprintf(sql, sizeof(sql),
-             "SELECT name, email, password, state FROM user "
+             "SELECT id, name, email, password, state FROM user "
              "WHERE email = '%s';",
              email.c_str());
     if (m_mysql.query(sql) && m_mysql.next()) {

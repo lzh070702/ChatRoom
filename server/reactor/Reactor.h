@@ -1,10 +1,11 @@
 #pragma once
+
 #include <sys/epoll.h>
 #include <atomic>
 #include <mutex>
 #include <vector>
+
 #include "../net/Connection.h"
-#include "../protocol/JsonProtocol.h"
 #include "../service/ChatService.h"
 
 class Reactor {
@@ -15,6 +16,7 @@ class Reactor {
     void pushFd(int fd);
     int getWakeupFd() const;
     int getConnCnt() const;
+    void handleWrite(Connection* conn, const std::string& data);
 
    private:
     void handleWakeup();

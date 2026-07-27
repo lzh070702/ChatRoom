@@ -7,9 +7,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(SERVER_SRCS
     server/main.cc
-    # server/common/Logger.cccd
-    server/net/TcpServer.cc
+    server/database/MySQL.cc
+    server/model/Friend.cc
+    server/model/FriendModel.cc
+    server/model/User.cc
+    server/model/UserModel.cc
     server/net/Connection.cc
+    server/net/TcpServer.cc
+    # server/common/Logger.cc
     server/protocol/JsonProtocol.cc
     server/reactor/Reactor.cc
     server/service/ChatService.cc
@@ -19,7 +24,12 @@ add_executable(server ${SERVER_SRCS})
 
 target_include_directories(server PRIVATE
     ${PROJECT_SOURCE_DIR}/server
+    ${MYSQL_INCLUDE_DIR}
+)
+
+target_link_libraries(server PRIVATE
+    mysqlclient
 )
 
 #mkdir build && cd build && cmake .. && make
-#./server 
+#./server

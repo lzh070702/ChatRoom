@@ -2,7 +2,8 @@
 #include <unistd.h>
 #include <cerrno>
 
-Connection::Connection(int fd) : m_fd(fd) {}
+Connection::Connection(int fd, Reactor* reactor)
+    : m_fd(fd), m_reactor(reactor) {}
 
 Connection::~Connection() {
     closeFd();
@@ -24,7 +25,6 @@ bool Connection::recvData(std::string& data) {
             data.append(buf, static_cast<size_t>(n));
         } else if (n == 0 ||
                    (n < 0 && (errno != EAGAIN && errno != EWOULDBLOCK))) {
-            closeFd();
             return false;
         } else if (errno == EINTR) {
             continue;
@@ -46,7 +46,6 @@ bool Connection::sendData(const std::string& data) {
         if (n > 0) {
             totalSent += static_cast<size_t>(n);
         } else if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-            closeFd();
             return false;
         } else if (errno == EINTR) {
             continue;
@@ -66,4 +65,16 @@ void Connection::closeFd() {
 
 bool Connection::isClosed() const {
     return m_fd == -1;
+}
+
+void Connection::setUserId(int id) {
+    m_user_id = id;
+}
+
+int Connection::getUserId() const {
+    return m_user_id;
+}
+
+Reactor* Connection::getReactor() const {
+    return m_reactor;
 }
