@@ -17,8 +17,7 @@ CREATE TABLE IF NOT EXISTS `friend` (
     `id` INT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '关系ID',
     `user_id` INT UNSIGNED NOT NULL COMMENT '用户ID',
     `friend_id` INT UNSIGNED NOT NULL COMMENT '好友ID',
-    `status` TINYINT NOT NULL DEFAULT 0 COMMENT '关系状态: 0.待验证 1.正常 2.拉黑',
-    `remark` VARCHAR(50) DEFAULT NULL COMMENT '好友备注',
+    `status` TINYINT NOT NULL DEFAULT 0 COMMENT '关系状态: 0.用户待验证 1.好友待验证 2.正常 3.拉黑',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_user_friend` (`user_id`, `friend_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='好友关系表';

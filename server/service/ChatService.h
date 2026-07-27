@@ -26,13 +26,16 @@ class ChatService {
 
     void signIn(Connection* conn, const json& js);
     void signUp(Connection* conn, const json& js);
-    void addFriend(Connection* conn, const json& js);
+    void sendRequest(Connection* conn, const json& js);
+    void processRequest(Connection* conn, const json& js);
+    void queryFriends(Connection* conn, const json& js);
+    void deleteFriend(Connection* conn, const json& js);
 
    private:
     using handler = std::function<void(Connection*, const json&)>;
     std::unordered_map<int, handler> m_handlers;
     UserModel m_user_model;
-    FriendModel m_friend_odel;
+    FriendModel m_friend_model;
     std::unordered_map<int, Connection*> m_user_conn;
     std::mutex m_mutex;
 };

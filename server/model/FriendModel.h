@@ -10,9 +10,11 @@ class FriendModel {
    public:
     FriendModel();
     bool insert(int user_id, int friend_id);
+    bool deleteFriend(int user_id, int friend_id);
+    bool updateStatus(int user_id, int friend_id, int status);
+    bool addFriend(int user_id, int friend_id);
     std::vector<User> queryFriends(int user_id);
-    bool deleteFriend(int userid, int friend_id);
-    bool isFriend(int user_id, int friend_id);
+    int isFriend(int user_id, int friend_id);
 
    private:
     MySQL m_mysql;
