@@ -24,10 +24,7 @@ bool MySQL::connect(const std::string& user,
 }
 
 bool MySQL::update(const std::string& sql) {
-    if (mysql_query(m_conn, sql.c_str())) {
-        return false;
-    }
-    return true;
+    return mysql_query(m_conn, sql.c_str()) == 0;
 }
 
 bool MySQL::query(const std::string& sql) {
@@ -60,15 +57,15 @@ std::string MySQL::value(int index) {
 }
 
 bool MySQL::transaction() {
-    return mysql_autocommit(m_conn, false);
+    return mysql_autocommit(m_conn, false) == 0;
 }
 
 bool MySQL::commit() {
-    return mysql_commit(m_conn);
+    return mysql_commit(m_conn) == 0;
 }
 
 bool MySQL::rollback() {
-    return mysql_rollback(m_conn);
+    return mysql_rollback(m_conn) == 0;
 }
 
 void MySQL::refreshAliveTime() {

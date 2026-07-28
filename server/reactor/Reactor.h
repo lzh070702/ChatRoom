@@ -8,6 +8,8 @@
 #include "../net/Connection.h"
 #include "../service/ChatService.h"
 
+class Connection;
+
 class Reactor {
    public:
     Reactor();

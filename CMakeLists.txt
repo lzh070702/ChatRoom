@@ -14,8 +14,6 @@ set(SERVER_SRCS
     server/model/UserModel.cc
     server/net/Connection.cc
     server/net/TcpServer.cc
-    # server/common/Logger.cc
-    server/protocol/JsonProtocol.cc
     server/reactor/Reactor.cc
     server/service/ChatService.cc
 )

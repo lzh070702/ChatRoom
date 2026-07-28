@@ -6,10 +6,13 @@
 #include <unordered_map>
 
 #include "../model/FriendModel.h"
+#include "../model/MessageModel.h"
 #include "../model/UserModel.h"
 #include "../net/Connection.h"
 
 using json = nlohmann::json;
+
+class Connection;
 
 class ChatService {
    public:
@@ -30,12 +33,16 @@ class ChatService {
     void processRequest(Connection* conn, const json& js);
     void queryFriends(Connection* conn, const json& js);
     void deleteFriend(Connection* conn, const json& js);
+    void oneChat(Connection* conn, const json& js);
+    void queryHistory(Connection* conn, const json& js);
 
    private:
     using handler = std::function<void(Connection*, const json&)>;
     std::unordered_map<int, handler> m_handlers;
     UserModel m_user_model;
     FriendModel m_friend_model;
+    MessageModel m_message_model;
     std::unordered_map<int, Connection*> m_user_conn;
     std::mutex m_mutex;
+
 };

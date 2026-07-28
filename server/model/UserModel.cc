@@ -1,7 +1,7 @@
-#include "UserModel.h"
 #include <cstdio>
 #include <string>
-#include "../database/MySQL.h"
+
+#include "UserModel.h"
 
 UserModel::UserModel() {
     m_mysql.connect("chatserver", "123456", "chatroom", "127.0.0.1");

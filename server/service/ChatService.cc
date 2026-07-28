@@ -19,7 +19,6 @@ void ChatService::handle(Connection* conn, const json& js) {
     }
 }
 
-/////////////////登出
 void ChatService::logout(Connection* conn) {
     int id = conn->getUserId();
     if (id == -1) {
@@ -43,6 +42,10 @@ ChatService::ChatService() {
     m_handlers[6] = [this](Connection* c, const json& j) {
         deleteFriend(c, j);
     };
+    m_handlers[7] = [this](Connection* c, const json& j) { oneChat(c, j); };
+    m_handlers[8] = [this](Connection* c, const json& j) {
+        queryHistory(c, j);
+    };
 }
 
 void ChatService::signIn(Connection* conn, const json& js) {
@@ -50,7 +53,7 @@ void ChatService::signIn(Connection* conn, const json& js) {
     User user;
     if (!m_user_model.queryByEmail(email, user)) {
         conn->getReactor()->handleWrite(
-            conn, R"({"type":1,"code":0,"msg":"该邮箱不存在"})");
+            conn, R"({"type":1,"code":0,"msg":"该账号不存在"})");
         return;
     }
     if (user.getPassword() != js["password"]) {
@@ -73,8 +76,14 @@ void ChatService::signIn(Connection* conn, const json& js) {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_user_conn[user.getId()] = conn;
     }
-    conn->getReactor()->handleWrite(conn,
-                                    R"({"type":1,"code":1,"msg":"登录成功"})");
+    json response;
+    response["type"] = 1;
+    response["code"] = 1;
+    response["msg"] = "登录成功";
+    response["id"] = user.getId();
+    response["name"] = user.getName();
+    response["email"] = user.getEmail();
+    conn->getReactor()->handleWrite(conn, response.dump());
 }
 
 void ChatService::signUp(Connection* conn, const json& js) {
@@ -101,6 +110,8 @@ void ChatService::signUp(Connection* conn, const json& js) {
 void ChatService::sendRequest(Connection* conn, const json& js) {
     int user_id = conn->getUserId();
     std::string email = js["email"];
+    std::string my_email = js["my_email"];
+    std::string name = js["name"];
     User user;
     if (!m_user_model.queryByEmail(email, user)) {
         conn->getReactor()->handleWrite(
@@ -125,14 +136,20 @@ void ChatService::sendRequest(Connection* conn, const json& js) {
     }
     conn->getReactor()->handleWrite(
         conn, R"({"type":3,"code":1,"msg":"成功发送申请"})");
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto it = m_user_conn.find(friend_id);
-    if (it != m_user_conn.end()) {
-        it->second->getReactor()->handleWrite(
-            it->second, R"({"type":3,"code":2,"msg":"好友申请","user_id":)" +
-                            std::to_string(user_id) + R"(,"name":")" +
-                            user.getName() + R"(","email":")" + email +
-                            R"("})");
+    Connection* friend_conn = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_user_conn.find(friend_id);
+        if (it != m_user_conn.end()) {
+            friend_conn = it->second;
+        }
+    }
+    if (friend_conn) {
+        friend_conn->getReactor()->handleWrite(
+            friend_conn,
+            R"({"type":3,"code":2,"msg":"有新的好友申请","user_id":)" +
+                std::to_string(user_id) + R"(,"name":")" + name +
+                R"(","email":")" + my_email + R"("})");
     }
 }
 
@@ -163,13 +180,15 @@ void ChatService::queryFriends(Connection* conn, const json& js) {
     json response;
     response["type"] = 5;
     response["code"] = 1;
+    response["msg"] = "成功获取到好友列表";
     for (auto& user : friends) {
-        json fri;
-        fri["name"] = user.getName();
-        fri["email"] = user.getEmail();
-        fri["state"] = user.getState();
-        fri["status"] = m_friend_model.isFriend(user_id, user.getId());
-        response["friends"].push_back(fri);
+        json friend_info;
+        friend_info["id"] = user.getId();
+        friend_info["name"] = user.getName();
+        friend_info["email"] = user.getEmail();
+        friend_info["state"] = user.getState();
+        friend_info["status"] = m_friend_model.isFriend(user_id, user.getId());
+        response["friends"].push_back(friend_info);
     }
     conn->getReactor()->handleWrite(conn, response.dump());
 }
@@ -179,8 +198,60 @@ void ChatService::deleteFriend(Connection* conn, const json& js) {
     int friend_id = js["id"];
     if (!m_friend_model.deleteFriend(user_id, friend_id)) {
         conn->getReactor()->handleWrite(
-            conn, R"({"type":6,"code":1,"msg":"删除好友失败"})");
+            conn, R"({"type":6,"code":0,"msg":"删除好友失败"})");
+        return;
     }
     conn->getReactor()->handleWrite(
         conn, R"({"type":6,"code":1,"msg":"成功删除该好友"})");
+}
+
+void ChatService::oneChat(Connection* conn, const json& js) {
+    int friend_id = js["id"];
+    int user_id = conn->getUserId();
+    std::string msg = js["msg"];
+    User user;
+    if (!m_user_model.queryById(friend_id, user)) {
+        conn->getReactor()->handleWrite(
+            conn, R"({"type":7,"code":0,"msg":"该用户已注销"})");
+        return;
+    }
+    if (m_friend_model.isFriend(user_id, friend_id) != 2) {
+        conn->getReactor()->handleWrite(
+            conn, R"({"type":7,"code":0,"msg":"不是好友，无法聊天"})");
+        return;
+    }
+    // 数据库if(存储数据库失败){返回发送失败，成功不用返回}
+    if (!m_message_model.insert(user_id, friend_id, 0, msg)) {
+        conn->getReactor()->handleWrite(
+            conn, R"({"type":7,"code":0,"msg":"消息发送失败"})");
+        return;
+    }
+    Connection* friend_conn = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_user_conn.find(friend_id);
+        if (it != m_user_conn.end()) {
+            friend_conn = it->second;
+        }
+    }
+    if (friend_conn) {
+        json response;
+        response["type"] = 7;
+        response["code"] = 1;
+        response["id"] = user_id;
+        response["msg"] = msg;
+        friend_conn->getReactor()->handleWrite(friend_conn, response.dump());
+    }
+}
+
+void ChatService::queryHistory(Connection* conn, const json& js) {
+    int friend_id = js["id"];
+    int user_id = conn->getUserId();
+    std::vector<json> history =
+        m_message_model.queryHistory(user_id, friend_id);
+    json response;
+    response["type"] = 8;
+    response["code"] = 1;
+    response["msg"] = history;
+    conn->getReactor()->handleWrite(conn, response.dump());
 }

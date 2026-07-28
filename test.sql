@@ -42,6 +42,6 @@ CREATE TABLE IF NOT EXISTS `message` (
     `receiver_id` INT UNSIGNED NOT NULL COMMENT '接受者ID',
     `type` TINYINT NOT NULL DEFAULT 0 COMMENT '聊天类型: 0.私聊 1.群聊',
     `content` TEXT NOT NULL COMMENT '发送信息',
-    `send_time` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '发送时间',
+    `send_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '发送时间',
     PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='聊天记录表';

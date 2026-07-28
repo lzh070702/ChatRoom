@@ -5,6 +5,8 @@
 
 #include "../reactor/Reactor.h"
 
+class Reactor;
+
 class Connection {
    public:
     explicit Connection(int fd, Reactor* reactor);
