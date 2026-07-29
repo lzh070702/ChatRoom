@@ -20,8 +20,9 @@ class MySQL {
     bool transaction();
     bool commit();
     bool rollback();
-    void refreshAliveTime();
-    long long getAliveTime();
+    unsigned long long getInsertId();
+    // void refreshAliveTime();
+    // long long getAliveTime();
 
    private:
     void freeResult();

@@ -8,8 +8,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(SERVER_SRCS
     server/main.cc
     server/database/MySQL.cc
-    server/model/Friend.cc
+    server/database/Redis.cc
     server/model/FriendModel.cc
+    server/model/MessageModel.cc
     server/model/User.cc
     server/model/UserModel.cc
     server/net/Connection.cc
@@ -27,6 +28,7 @@ target_include_directories(server PRIVATE
 
 target_link_libraries(server PRIVATE
     mysqlclient
+    hiredis
 )
 
 #mkdir build && cd build && cmake .. && make

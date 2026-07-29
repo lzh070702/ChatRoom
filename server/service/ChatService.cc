@@ -46,6 +46,7 @@ ChatService::ChatService() {
     m_handlers[8] = [this](Connection* c, const json& j) {
         queryHistory(c, j);
     };
+    m_handlers[9] = [this](Connection* c, const json& j) { createGroup(c, j); };
 }
 
 void ChatService::signIn(Connection* conn, const json& js) {
@@ -84,6 +85,15 @@ void ChatService::signIn(Connection* conn, const json& js) {
     response["name"] = user.getName();
     response["email"] = user.getEmail();
     conn->getReactor()->handleWrite(conn, response.dump());
+    std::string data;
+    std::string request_key = "offline_request:" + std::to_string(user.getId());
+    while (m_redis.rpop(request_key, data)) {
+        conn->getReactor()->handleWrite(conn, data);
+    }
+    std::string msg_key = "offline_msg:" + std::to_string(user.getId());
+    while (m_redis.rpop(msg_key, data)) {
+        conn->getReactor()->handleWrite(conn, data);
+    }
 }
 
 void ChatService::signUp(Connection* conn, const json& js) {
@@ -134,8 +144,7 @@ void ChatService::sendRequest(Connection* conn, const json& js) {
             conn, R"({"type":3,"code":0,"msg":"好友申请发送失败"})");
         return;
     }
-    conn->getReactor()->handleWrite(
-        conn, R"({"type":3,"code":1,"msg":"成功发送申请"})");
+
     Connection* friend_conn = nullptr;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -144,13 +153,27 @@ void ChatService::sendRequest(Connection* conn, const json& js) {
             friend_conn = it->second;
         }
     }
+    json response;
+    response["type"] = 3;
+    response["code"] = 2;
+    response["msg"] = "有新的好友申请";
+    response["id"] = user_id;
+    response["name"] = name;
+    response["email"] = my_email;
     if (friend_conn) {
-        friend_conn->getReactor()->handleWrite(
-            friend_conn,
-            R"({"type":3,"code":2,"msg":"有新的好友申请","user_id":)" +
-                std::to_string(user_id) + R"(,"name":")" + name +
-                R"(","email":")" + my_email + R"("})");
+        friend_conn->getReactor()->handleWrite(friend_conn, response.dump());
+        conn->getReactor()->handleWrite(
+            conn, R"({"type":3,"code":1,"msg":"成功发送申请"})");
+        return;
     }
+    if (!m_redis.lpush("offline_request:" + std::to_string(friend_id),
+                       response.dump())) {
+        conn->getReactor()->handleWrite(
+            conn, R"({"type":3,"code":0,"msg":"好友申请发送失败"})");
+        return;
+    }
+    conn->getReactor()->handleWrite(
+        conn, R"({"type":3,"code":1,"msg":"成功发送申请"})");
 }
 
 void ChatService::processRequest(Connection* conn, const json& js) {
@@ -220,7 +243,6 @@ void ChatService::oneChat(Connection* conn, const json& js) {
             conn, R"({"type":7,"code":0,"msg":"不是好友，无法聊天"})");
         return;
     }
-    // 数据库if(存储数据库失败){返回发送失败，成功不用返回}
     if (!m_message_model.insert(user_id, friend_id, 0, msg)) {
         conn->getReactor()->handleWrite(
             conn, R"({"type":7,"code":0,"msg":"消息发送失败"})");
@@ -234,13 +256,19 @@ void ChatService::oneChat(Connection* conn, const json& js) {
             friend_conn = it->second;
         }
     }
+    json response;
+    response["type"] = 7;
+    response["code"] = 1;
+    response["id"] = user_id;
+    response["msg"] = msg;
     if (friend_conn) {
-        json response;
-        response["type"] = 7;
-        response["code"] = 1;
-        response["id"] = user_id;
-        response["msg"] = msg;
         friend_conn->getReactor()->handleWrite(friend_conn, response.dump());
+        return;
+    }
+    if (!m_redis.lpush("offline_msg:" + std::to_string(friend_id),
+                       response.dump())) {
+        conn->getReactor()->handleWrite(
+            conn, R"({"type":7,"code":0,"msg":"消息发送失败"})");
     }
 }
 
@@ -253,5 +281,22 @@ void ChatService::queryHistory(Connection* conn, const json& js) {
     response["type"] = 8;
     response["code"] = 1;
     response["msg"] = history;
+    conn->getReactor()->handleWrite(conn, response.dump());
+}
+
+void ChatService::createGroup(Connection* conn, const json& js) {
+    std::string name = js["name"];
+    int user_id = conn->getUserId();
+    unsigned long long group_id;
+    if (!m_group_model.createGroup(name, user_id,group_id)) {
+        conn->getReactor()->handleWrite(
+            conn, R"({"type":8,"code":0,"msg":"创建群聊失败"})");
+        return;
+    }
+    json response;
+    response["type"] = 8;
+    response["code"] = 1;
+    response["msg"] = "成功创建群聊";
+    response["group_id"] = group_id;
     conn->getReactor()->handleWrite(conn, response.dump());
 }

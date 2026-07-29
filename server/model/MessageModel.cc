@@ -1,5 +1,9 @@
 #include "MessageModel.h"
 
+MessageModel::MessageModel() {
+    m_mysql.connect("chatserver", "123456", "chatroom", "127.0.0.1");
+}
+
 bool MessageModel::insert(int sender_id,
                           int receiver_id,
                           int type,

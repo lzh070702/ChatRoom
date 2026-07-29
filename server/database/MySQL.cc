@@ -68,17 +68,21 @@ bool MySQL::rollback() {
     return mysql_rollback(m_conn) == 0;
 }
 
-void MySQL::refreshAliveTime() {
-    m_aliveTime = std::chrono::steady_clock::now();
+unsigned long long MySQL::getInsertId() {
+    return mysql_insert_id(m_conn);
 }
 
-long long MySQL::getAliveTime() {
-    std::chrono::nanoseconds res =
-        std::chrono::steady_clock::now() - m_aliveTime;
-    std::chrono::milliseconds millsec =
-        std::chrono::duration_cast<std::chrono::milliseconds>(res);
-    return millsec.count();
-}
+// void MySQL::refreshAliveTime() {
+//     m_aliveTime = std::chrono::steady_clock::now();
+// }
+
+// long long MySQL::getAliveTime() {
+//     std::chrono::nanoseconds res =
+//         std::chrono::steady_clock::now() - m_aliveTime;
+//     std::chrono::milliseconds millsec =
+//         std::chrono::duration_cast<std::chrono::milliseconds>(res);
+//     return millsec.count();
+// }
 
 void MySQL::freeResult() {
     if (m_result != nullptr) {

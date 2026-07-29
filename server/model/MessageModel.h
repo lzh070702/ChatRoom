@@ -10,6 +10,7 @@ using json = nlohmann::json;
 
 class MessageModel {
    public:
+    MessageModel();
     bool insert(int sender_id,
                 int receiver_id,
                 int type,

@@ -5,7 +5,9 @@
 #include <nlohmann/json.hpp>
 #include <unordered_map>
 
+#include "../database/Redis.h"
 #include "../model/FriendModel.h"
+#include "../model/GroupModel.h"
 #include "../model/MessageModel.h"
 #include "../model/UserModel.h"
 #include "../net/Connection.h"
@@ -35,14 +37,16 @@ class ChatService {
     void deleteFriend(Connection* conn, const json& js);
     void oneChat(Connection* conn, const json& js);
     void queryHistory(Connection* conn, const json& js);
+    void createGroup(Connection* conn, const json& js);
 
    private:
     using handler = std::function<void(Connection*, const json&)>;
     std::unordered_map<int, handler> m_handlers;
+    Redis m_redis;
     UserModel m_user_model;
     FriendModel m_friend_model;
+    GroupModel m_group_model;
     MessageModel m_message_model;
     std::unordered_map<int, Connection*> m_user_conn;
     std::mutex m_mutex;
-
 };

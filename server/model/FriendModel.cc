@@ -21,8 +21,8 @@ bool FriendModel::insert(int user_id, int friend_id) {
     if (!m_mysql.transaction()) {
         return false;
     }
-    if (m_mysql.update(sql1) && m_mysql.update(sql2)) {
-        return m_mysql.commit();
+    if (m_mysql.update(sql1) && m_mysql.update(sql2) && m_mysql.commit()) {
+        return true;
     } else {
         m_mysql.rollback();
         return false;
@@ -62,8 +62,8 @@ bool FriendModel::addFriend(int user_id, int friend_id) {
     if (!m_mysql.transaction()) {
         return false;
     }
-    if (m_mysql.update(sql1) && m_mysql.update(sql2)) {
-        return m_mysql.commit();
+    if (m_mysql.update(sql1) && m_mysql.update(sql2) && m_mysql.commit()) {
+        return true;
     } else {
         m_mysql.rollback();
         return false;
