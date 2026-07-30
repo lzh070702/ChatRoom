@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS `group_info` (
 CREATE TABLE IF NOT EXISTS `group_user` (
     `group_id` INT UNSIGNED NOT NULL COMMENT '群聊ID',
     `user_id` INT UNSIGNED NOT NULL COMMENT '群聊成员ID',
-    `role` TINYINT NOT NULL DEFAULT 0 COMMENT '角色: 0.成员 1.管理员 2.群主',
+    `role` TINYINT NOT NULL DEFAULT 0 COMMENT '角色: 0.待验证 1.成员 2.管理员 3.群主',
     PRIMARY KEY (`group_id`, `user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='群聊成员表';
 

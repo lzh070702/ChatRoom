@@ -47,6 +47,15 @@ ChatService::ChatService() {
         queryHistory(c, j);
     };
     m_handlers[9] = [this](Connection* c, const json& j) { createGroup(c, j); };
+    m_handlers[10] = [this](Connection* c, const json& j) {
+        queryGroups(c, j);
+    };
+    m_handlers[11] = [this](Connection* c, const json& j) {
+        applyGroups(c, j);
+    };
+    m_handlers[12] = [this](Connection* c, const json& j) {
+        processGroupRequest(c, j);
+    };
 }
 
 void ChatService::signIn(Connection* conn, const json& js) {
@@ -178,7 +187,7 @@ void ChatService::sendRequest(Connection* conn, const json& js) {
 
 void ChatService::processRequest(Connection* conn, const json& js) {
     int user_id = conn->getUserId();
-    int decision = js["decision"];
+    int agree = js["agree"];
     int friend_id = js["id"];
     User user;
     if (!m_user_model.queryById(friend_id, user)) {
@@ -186,7 +195,7 @@ void ChatService::processRequest(Connection* conn, const json& js) {
             conn, R"({"type":4,"code":0,"msg":"该用户已注销"})");
         return;
     }
-    if (decision == 1) {
+    if (agree == 1) {
         m_friend_model.addFriend(user_id, friend_id);
         conn->getReactor()->handleWrite(
             conn, R"({"type":4,"code":1,"msg":"成功添加为好友"})");
@@ -287,16 +296,90 @@ void ChatService::queryHistory(Connection* conn, const json& js) {
 void ChatService::createGroup(Connection* conn, const json& js) {
     std::string name = js["name"];
     int user_id = conn->getUserId();
-    unsigned long long group_id;
-    if (!m_group_model.createGroup(name, user_id,group_id)) {
+    int group_id;
+    if (!m_group_model.createGroup(name, user_id, group_id)) {
         conn->getReactor()->handleWrite(
-            conn, R"({"type":8,"code":0,"msg":"创建群聊失败"})");
+            conn, R"({"type":9,"code":0,"msg":"创建群聊失败"})");
         return;
     }
     json response;
-    response["type"] = 8;
+    response["type"] = 9;
     response["code"] = 1;
     response["msg"] = "成功创建群聊";
     response["group_id"] = group_id;
     conn->getReactor()->handleWrite(conn, response.dump());
+}
+
+void ChatService::queryGroups(Connection* conn, const json& js) {
+    std::vector<json> groups = m_group_model.queryGroups(conn->getUserId());
+    json response;
+    response["type"] = 10;
+    response["code"] = 1;
+    response["msg"] = groups;
+    conn->getReactor()->handleWrite(conn, response.dump());
+}
+
+void ChatService::applyGroups(Connection* conn, const json& js) {
+    int group_id = js["group_id"];
+    std::string email = js["email"];
+    std::string name = js["name"];
+    int user_id = conn->getUserId();
+    if (!m_group_model.groupExist(group_id)) {
+        conn->getReactor()->handleWrite(
+            conn, R"({"type":11,"code":0,"msg":"该群聊不存在"})");
+        return;
+    }
+    if (m_group_model.isInGroup(group_id, user_id)) {
+        conn->getReactor()->handleWrite(
+            conn, R"({"type":11,"code":0,"msg":"禁止重复加入该群"})");
+        return;
+    }
+    std::vector<int> users;
+    if (!m_group_model.applyGroup(group_id, user_id, users)) {
+        conn->getReactor()->handleWrite(
+            conn, R"({"type":11,"code":0,"msg":"入群申请发送失败"})");
+        return;
+    }
+    json response;
+    response["type"] = 11;
+    response["code"] = 1;
+    response["msg"] = "入群申请";
+    response["id"] = user_id;
+    response["name"] = name;
+    response["email"] = email;
+    for (int& user : users) {
+        Connection* user_conn = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            auto it = m_user_conn.find(user);
+            if (it != m_user_conn.end()) {
+                user_conn = it->second;
+            }
+        }
+        if (user_conn) {
+            user_conn->getReactor()->handleWrite(user_conn, response.dump());
+        } else {
+            if (!m_redis.lpush("offline_group_request:" + std::to_string(user),
+                               response.dump())) {
+                conn->getReactor()->handleWrite(
+                    conn, R"({"type":11,"code":0,"msg":"入群申请发送失败"})");
+                return;
+            }
+        }
+    }
+    conn->getReactor()->handleWrite(
+        conn, R"({"type":11,"code":1,"msg":"入群申请发送成功"})");
+}
+
+void ChatService::processGroupRequest(Connection* conn, const json& js) {
+    int group_id = js["group_id"];
+    bool agree = js["agree"];
+    int user_id = js["id"];
+    if (!m_group_model.processGroupRequest(group_id, user_id, agree)) {
+        conn->getReactor()->handleWrite(
+            conn, R"({"type":12,"code":0,"msg":"操作失败"})");
+        return;
+    }
+    conn->getReactor()->handleWrite(conn,
+                                    R"({"type":12,"code":0,"msg":"操作成功"})");
 }

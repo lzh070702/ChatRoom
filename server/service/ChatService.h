@@ -23,7 +23,6 @@ class ChatService {
 
     static ChatService& instance();
     void handle(Connection* conn, const json& js);
-    // 登出
     void logout(Connection* conn);
 
    private:
@@ -38,6 +37,9 @@ class ChatService {
     void oneChat(Connection* conn, const json& js);
     void queryHistory(Connection* conn, const json& js);
     void createGroup(Connection* conn, const json& js);
+    void queryGroups(Connection* conn, const json& js);
+    void applyGroups(Connection* conn, const json& js);
+    void processGroupRequest(Connection* conn, const json& js);
 
    private:
     using handler = std::function<void(Connection*, const json&)>;
