@@ -4,7 +4,7 @@ GroupModel::GroupModel() {
     m_mysql.connect("chatserver", "123456", "chatroom", "127.0.0.1");
 }
 
-bool GroupModel::createGroup(std::string name, int owner_id, int group_id) {
+bool GroupModel::createGroup(std::string name, int owner_id, int& group_id) {
     char sql[1024] = {0};
     if (!m_mysql.transaction()) {
         return false;
@@ -58,7 +58,21 @@ std::vector<json> GroupModel::queryGroups(int user_id) {
     return groups;
 }
 
-std::vector<int> GroupModel::queryMembers(int group_id) {}
+std::vector<int> GroupModel::queryMembers(int group_id) {
+    char sql[1024] = {0};
+    snprintf(sql, sizeof(sql),
+             "SELECT user_id FROM group_user "
+             "WHERE group_id = %d AND role > 0;",
+             group_id);
+    std::vector<int> members;
+    if (!m_mysql.query(sql)) {
+        return members;
+    }
+    while (m_mysql.next()) {
+        members.emplace_back(std::stoi(m_mysql.value(0)));
+    }
+    return members;
+}
 
 bool GroupModel::groupExist(int group_id) {
     char sql[1024] = {0};

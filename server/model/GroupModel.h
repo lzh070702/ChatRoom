@@ -10,7 +10,7 @@ using json = nlohmann::json;
 class GroupModel {
    public:
     GroupModel();
-    bool createGroup(std::string name, int owner_id, int group_id);
+    bool createGroup(std::string name, int owner_id, int& group_id);
     std::vector<json> queryGroups(int user_id);
     std::vector<int> queryMembers(int group_id);
     bool groupExist(int group_id);
