@@ -104,7 +104,7 @@ void Reactor ::handleWrite(Connection* conn, const std::string& data) {
     if (data.empty()) {
         return;
     }
-    if (!conn->sendData(data)) {
+    if (!conn->sendData(data + '\n')) {
         handleClose(conn);
         return;
     }

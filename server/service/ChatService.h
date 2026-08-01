@@ -40,6 +40,14 @@ class ChatService {
     void queryGroups(Connection* conn, const json& js);
     void applyGroups(Connection* conn, const json& js);
     void processGroupRequest(Connection* conn, const json& js);
+    void queryMembers(Connection* conn, const json& js);
+    void groupChat(Connection* conn, const json& js);
+    void queryGroupHistory(Connection* conn, const json& js);
+    void quitGroup(Connection* conn, const json& js);
+    void dissolveGroup(Connection* conn, const json& js);
+    void promoteAdmin(Connection* conn, const json& js);
+    void demoteAdmin(Connection* conn, const json& js);
+    void kickMember(Connection* conn, const json& js);
 
    private:
     using handler = std::function<void(Connection*, const json&)>;

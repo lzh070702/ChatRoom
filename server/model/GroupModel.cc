@@ -138,3 +138,65 @@ bool GroupModel::processGroupRequest(int group_id, int user_id, bool agree) {
     return m_mysql.update(sql);
 }
 
+bool GroupModel::delMember(int group_id, int user_id) {
+    char sql[1024] = {0};
+    snprintf(sql, sizeof(sql),
+             "DELETE FROM group_user "
+             "WHERE group_id = %d AND user_id = %d;",
+             group_id, user_id);
+    return m_mysql.update(sql);
+}
+
+bool GroupModel::dissolveGroup(int group_id) {
+    if (!m_mysql.transaction()) {
+        return false;
+    }
+    char sql[1024] = {0};
+    bool success = true;
+    snprintf(sql, sizeof(sql), "DELETE FROM group_user WHERE group_id = %d;",
+             group_id);
+    if (!m_mysql.update(sql)) {
+        success = false;
+    }
+    snprintf(sql, sizeof(sql), "DELETE FROM group_info WHERE id = %d;",
+             group_id);
+    if (!m_mysql.update(sql)) {
+        success = false;
+    }
+    if (success && m_mysql.commit()) {
+        return true;
+    } else {
+        m_mysql.rollback();
+        return false;
+    }
+}
+
+bool GroupModel::promoteAdmin(int group_id, int target_id) {
+    char sql[1024] = {0};
+    snprintf(sql, sizeof(sql),
+             "UPDATE group_user SET role = 2 "
+             "WHERE group_id = %d AND user_id = %d;",
+             group_id, target_id);
+    return m_mysql.update(sql);
+}
+
+bool GroupModel::demoteAdmin(int group_id, int target_id) {
+    char sql[1024] = {0};
+    snprintf(sql, sizeof(sql),
+             "UPDATE group_user SET role = 1 "
+             "WHERE group_id = %d AND user_id = %d;",
+             group_id, target_id);
+    return m_mysql.update(sql);
+}
+
+int GroupModel::getRole(int group_id, int user_id) {
+    char sql[1024] = {0};
+    snprintf(sql, sizeof(sql),
+             "SELECT role FROM group_user "
+             "WHERE group_id = %d AND user_id = %d;",
+             group_id, user_id);
+    if (m_mysql.query(sql) && m_mysql.next()) {
+        return std::stoi(m_mysql.value(0));
+    }
+    return -1;
+}

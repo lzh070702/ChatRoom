@@ -39,3 +39,26 @@ std::vector<json> MessageModel::queryHistory(int user_id, int friend_id) {
     }
     return history;
 }
+
+std::vector<json> MessageModel::queryGroupHistory(int group_id) {
+    char sql[1024] = {0};
+    snprintf(sql, sizeof(sql),
+             "SELECT sender_id, content, send_time FROM ("
+             "SELECT sender_id, content, send_time FROM message "
+             "WHERE type = 1 AND receiver_id = %d "
+             "ORDER BY send_time DESC LIMIT 100"
+             ") AS t ORDER BY send_time ASC;",
+             group_id);
+    std::vector<json> history;
+    if (!m_mysql.query(sql)) {
+        return history;
+    }
+    while (m_mysql.next()) {
+        json js;
+        js["sender_id"] = std::stoi(m_mysql.value(0));
+        js["content"] = m_mysql.value(1);
+        js["time"] = m_mysql.value(2);
+        history.emplace_back(js);
+    }
+    return history;
+}
