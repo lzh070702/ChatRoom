@@ -1,4 +1,5 @@
-#include <iostream>
+#include <glog/logging.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "pool.h"
@@ -11,7 +12,10 @@ using namespace std;
 
 const int SUB_CNT = 4;
 
-int main() {
+int main(int argc, char* argv[]) {
+    google::InitGoogleLogging(argv[0]);
+    FLAGS_logtostderr = true;
+    mkdir("./files", 0755);
     pool thread_pool(SUB_CNT);
     vector<unique_ptr<Reactor>> subs(SUB_CNT);
     for (int i = 0; i < SUB_CNT; i++) {
@@ -20,11 +24,12 @@ int main() {
             reactor->loop();
         });
     }
-
     TcpServer server(8888);
     if (!server.start()) {
+        LOG(ERROR) << "Server start failed";
         return -1;
     }
+    LOG(INFO) << "Server started on port 8888";
     int main_epfd = epoll_create1(0);
     epoll_event ev{}, events[1024];
     ev.events = EPOLLIN;

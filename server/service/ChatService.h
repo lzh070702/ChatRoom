@@ -29,11 +29,12 @@ class ChatService {
 
    private:
     ChatService();
+    void heartbeat(std::shared_ptr<Connection> conn, const json& js);
     void signUp(std::shared_ptr<Connection> conn, const json& js);
     void signIn(std::shared_ptr<Connection> conn, const json& js);
     void sendCode(std::shared_ptr<Connection> conn, const json& js);
     void codeLogin(std::shared_ptr<Connection> conn, const json& js);
-    void forgotPassword(std::shared_ptr<Connection> conn, const json& js);
+    void changePassword(std::shared_ptr<Connection> conn, const json& js);
     void signOut(std::shared_ptr<Connection> conn, const json& js);
     void queryFriends(std::shared_ptr<Connection> conn, const json& js);
     void sendRequest(std::shared_ptr<Connection> conn, const json& js);
@@ -54,6 +55,12 @@ class ChatService {
     void dissolveGroup(std::shared_ptr<Connection> conn, const json& js);
     void groupChat(std::shared_ptr<Connection> conn, const json& js);
     void queryGroupHistory(std::shared_ptr<Connection> conn, const json& js);
+    void pullFile(std::shared_ptr<Connection> conn, const json& js);
+    std::string base64Encode(const std::string& data);
+    std::string base64Decode(const std::string& encoded);
+    void saveFile(int message_id,
+                  const std::string& file_name,
+                  const std::string& file_data);
 
    private:
     using handler =

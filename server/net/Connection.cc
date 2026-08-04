@@ -22,13 +22,16 @@ bool Connection::recvData() {
         ssize_t n = read(m_fd, buf, sizeof(buf));
         if (n > 0) {
             m_read_buf.append(buf, static_cast<size_t>(n));
-        } else if (n == 0 ||
-                   (n < 0 && (errno != EAGAIN && errno != EWOULDBLOCK))) {
+        } else if (n == 0) {
             return false;
-        } else if (errno == EINTR) {
-            continue;
         } else {
-            break;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                return true;
+            } else if (errno == EINTR) {
+                continue;
+            }else {
+                return false;
+            }
         }
     }
     return true;
@@ -54,12 +57,16 @@ bool Connection::sendData(const std::string& data) {
             write(m_fd, data.data() + totalSent, data.size() - totalSent);
         if (n > 0) {
             totalSent += static_cast<size_t>(n);
-        } else if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+        } else if (n == 0) {
             return false;
-        } else if (errno == EINTR) {
-            continue;
         } else {
-            break;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                break;
+            } else if (errno == EINTR) {
+                continue;
+            } else {
+                return false;
+            }
         }
     }
     return totalSent == data.size();
@@ -86,4 +93,13 @@ int Connection::getUserId() const {
 
 Reactor* Connection::getReactor() const {
     return m_reactor;
+}
+
+void Connection::updateActive() {
+    m_last_active = std::chrono::steady_clock::now();
+}
+
+bool Connection::isIdle(int ms) const {
+    auto elapsed = std::chrono::steady_clock::now() - m_last_active;
+    return elapsed > std::chrono::milliseconds(ms);
 }

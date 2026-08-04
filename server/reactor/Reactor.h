@@ -26,6 +26,7 @@ class Reactor {
     void handleWakeup();
     void handleClose(std::shared_ptr<Connection> conn);
     void handleRead(std::shared_ptr<Connection> conn);
+    void handleHeartbeat();
 
    private:
     int m_epfd;
@@ -36,4 +37,6 @@ class Reactor {
     std::unordered_map<int, std::shared_ptr<Connection>> m_conns;
 
     static constexpr int MAX_EVENTS = 1024;
+    static constexpr int HEARTBEAT_MS = 20000;
+    static constexpr int IDLE_TIMEOUT_MS = 60000;
 };

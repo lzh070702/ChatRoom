@@ -4,23 +4,29 @@ MessageModel::MessageModel() {
     m_mysql.connect("chatserver", "123456", "chatroom", "127.0.0.1");
 }
 
-bool MessageModel::insert(int sender_id,
-                          int receiver_id,
-                          int type,
-                          const std::string& msg) {
+int MessageModel::insert(int sender_id,
+                         int receiver_id,
+                         int type,
+                         const std::string& msg,
+                         bool is_file) {
     char sql[1024] = {0};
     snprintf(sql, sizeof(sql),
-             "INSERT INTO message(sender_id, receiver_id, type, content) "
-             "VALUES(%d,%d,%d,'%s');",
-             sender_id, receiver_id, type, msg.c_str());
-    return m_mysql.update(sql);
+             "INSERT INTO message(sender_id, receiver_id, type, content, "
+             "is_file) "
+             "VALUES(%d,%d,%d,'%s',%d);",
+             sender_id, receiver_id, type, msg.c_str(), is_file ? 1 : 0);
+    if (!m_mysql.update(sql)) {
+        return -1;
+    }
+    return static_cast<int>(m_mysql.getInsertId());
 }
 
 std::vector<json> MessageModel::queryHistory(int user_id, int friend_id) {
     char sql[1024] = {0};
     snprintf(sql, sizeof(sql),
-             "SELECT sender_id, content, send_time FROM ("
-             "SELECT sender_id, content, send_time FROM message WHERE type = 0 "
+             "SELECT sender_id, content, send_time, is_file FROM ("
+             "SELECT sender_id, content, send_time, is_file FROM message "
+             "WHERE type = 0 "
              "AND ((sender_id = %d AND receiver_id = %d) "
              "OR (sender_id = %d AND receiver_id = %d)) "
              "ORDER BY send_time DESC LIMIT 100"
@@ -35,6 +41,7 @@ std::vector<json> MessageModel::queryHistory(int user_id, int friend_id) {
         js["sender_id"] = std::stoi(m_mysql.value(0));
         js["content"] = m_mysql.value(1);
         js["time"] = m_mysql.value(2);
+        js["is_file"] = std::stoi(m_mysql.value(3));
         history.emplace_back(js);
     }
     return history;
@@ -43,8 +50,8 @@ std::vector<json> MessageModel::queryHistory(int user_id, int friend_id) {
 std::vector<json> MessageModel::queryGroupHistory(int group_id) {
     char sql[1024] = {0};
     snprintf(sql, sizeof(sql),
-             "SELECT sender_id, content, send_time FROM ("
-             "SELECT sender_id, content, send_time FROM message "
+             "SELECT sender_id, content, send_time, is_file FROM ("
+             "SELECT sender_id, content, send_time, is_file FROM message "
              "WHERE type = 1 AND receiver_id = %d "
              "ORDER BY send_time DESC LIMIT 100"
              ") AS t ORDER BY send_time ASC;",
@@ -58,6 +65,7 @@ std::vector<json> MessageModel::queryGroupHistory(int group_id) {
         js["sender_id"] = std::stoi(m_mysql.value(0));
         js["content"] = m_mysql.value(1);
         js["time"] = m_mysql.value(2);
+        js["is_file"] = std::stoi(m_mysql.value(3));
         history.emplace_back(js);
     }
     return history;

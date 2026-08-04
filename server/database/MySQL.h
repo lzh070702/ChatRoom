@@ -21,8 +21,6 @@ class MySQL {
     bool commit();
     bool rollback();
     unsigned long long getInsertId();
-    // void refreshAliveTime();
-    // long long getAliveTime();
 
    private:
     void freeResult();

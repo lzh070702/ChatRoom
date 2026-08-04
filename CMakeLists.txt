@@ -32,6 +32,7 @@ target_link_libraries(server PRIVATE
     mysqlclient
     hiredis
     curl
+    glog
 )
 
 #mkdir build && cd build && cmake .. && make

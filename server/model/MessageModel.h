@@ -11,10 +11,11 @@ using json = nlohmann::json;
 class MessageModel {
    public:
     MessageModel();
-    bool insert(int sender_id,
-                int receiver_id,
-                int type,
-                const std::string& msg);
+    int insert(int sender_id,
+               int receiver_id,
+               int type,
+               const std::string& msg,
+               bool is_file);
     std::vector<json> queryHistory(int user_id, int friend_id);
     std::vector<json> queryGroupHistory(int group_id);
     bool removeAll(int user_id);

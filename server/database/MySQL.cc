@@ -1,3 +1,5 @@
+#include <glog/logging.h>
+
 #include "MySQL.h"
 
 MySQL::MySQL() {
@@ -24,12 +26,17 @@ bool MySQL::connect(const std::string& user,
 }
 
 bool MySQL::update(const std::string& sql) {
-    return mysql_query(m_conn, sql.c_str()) == 0;
+    if (mysql_query(m_conn, sql.c_str())) {
+        LOG(ERROR) << "MySQL update failed: " << mysql_error(m_conn);
+        return false;
+    }
+    return true;
 }
 
 bool MySQL::query(const std::string& sql) {
     freeResult();
     if (mysql_query(m_conn, sql.c_str())) {
+        LOG(ERROR) << "MySQL query failed: " << mysql_error(m_conn);
         return false;
     }
     m_result = mysql_store_result(m_conn);
@@ -71,18 +78,6 @@ bool MySQL::rollback() {
 unsigned long long MySQL::getInsertId() {
     return mysql_insert_id(m_conn);
 }
-
-// void MySQL::refreshAliveTime() {
-//     m_aliveTime = std::chrono::steady_clock::now();
-// }
-
-// long long MySQL::getAliveTime() {
-//     std::chrono::nanoseconds res =
-//         std::chrono::steady_clock::now() - m_aliveTime;
-//     std::chrono::milliseconds millsec =
-//         std::chrono::duration_cast<std::chrono::milliseconds>(res);
-//     return millsec.count();
-// }
 
 void MySQL::freeResult() {
     if (m_result != nullptr) {

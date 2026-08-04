@@ -1,7 +1,7 @@
 #include <fcntl.h>
+#include <glog/logging.h>
 #include <sys/eventfd.h>
 #include <unistd.h>
-#include <iostream>  ////////////////////////////
 
 #include "Reactor.h"
 
@@ -21,8 +21,14 @@ Reactor ::~Reactor() {
 
 void Reactor ::loop() {
     epoll_event events[MAX_EVENTS];
+    auto last_beat = std::chrono::steady_clock::now();
     while (true) {
-        int n = epoll_wait(m_epfd, events, MAX_EVENTS, -1);
+        int n = epoll_wait(m_epfd, events, MAX_EVENTS, HEARTBEAT_MS);
+        auto now = std::chrono::steady_clock::now();
+        if (now - last_beat >= std::chrono::milliseconds(HEARTBEAT_MS)) {
+            handleHeartbeat();
+            last_beat = now;
+        }
         for (int i = 0; i < n; i++) {
             if (events[i].data.ptr == &m_wakeup_fd) {
                 handleWakeup();
@@ -79,16 +85,20 @@ void Reactor ::handleWakeup() {
         if (epoll_ctl(m_epfd, EPOLL_CTL_ADD, fd, &ev) == 0) {
             m_conns[fd] = conn;
             m_conn_cnt++;
+            LOG(INFO) << "New connection fd=" << fd;
         }
     }
 }
 
 void Reactor ::handleClose(std::shared_ptr<Connection> conn) {
-    epoll_ctl(m_epfd, EPOLL_CTL_DEL, conn->getFd(), nullptr);
+    int fd = conn->getFd();
+    int uid = conn->getUserId();
+    epoll_ctl(m_epfd, EPOLL_CTL_DEL, fd, nullptr);
     ChatService::instance().logout(conn);
     conn->setUserId(-1);
-    m_conns.erase(conn->getFd());
+    m_conns.erase(fd);
     m_conn_cnt--;
+    LOG(INFO) << "Connection closed fd=" << fd << " uid=" << uid;
 }
 
 void Reactor ::handleRead(std::shared_ptr<Connection> conn) {
@@ -96,10 +106,18 @@ void Reactor ::handleRead(std::shared_ptr<Connection> conn) {
         handleClose(conn);
         return;
     }
+    conn->updateActive();
     std::string msg;
     while (conn->getMessage(msg)) {
-        auto js = json::parse(msg);
-        ChatService::instance().handle(conn, js);
+        try {
+            auto js = json::parse(msg);
+            ChatService::instance().handle(conn, js);
+        } catch (const json::exception& e) {
+            LOG(ERROR) << "JSON error fd=" << conn->getFd()
+                       << " what=" << e.what();
+            handleClose(conn);
+            return;
+        }
     }
 }
 
@@ -109,7 +127,23 @@ void Reactor ::handleWrite(std::shared_ptr<Connection> conn,
         return;
     }
     if (!conn->sendData(data + '\n')) {
+        LOG(ERROR) << "Write failed fd=" << conn->getFd()
+                   << " uid=" << conn->getUserId();
         handleClose(conn);
         return;
+    }
+}
+
+void Reactor ::handleHeartbeat() {
+    std::vector<std::shared_ptr<Connection>> idle_conns;
+    for (auto& pair : m_conns) {
+        if (pair.second->isIdle(IDLE_TIMEOUT_MS)) {
+            idle_conns.push_back(pair.second);
+        }
+    }
+    for (auto& conn : idle_conns) {
+        LOG(WARNING) << "Heartbeat timeout fd=" << conn->getFd()
+                     << " uid=" << conn->getUserId();
+        handleClose(conn);
     }
 }

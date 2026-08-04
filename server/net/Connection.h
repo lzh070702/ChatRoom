@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <string>
 
@@ -20,10 +21,14 @@ class Connection {
     void setUserId(int id);
     int getUserId() const;
     Reactor* getReactor() const;
+    void updateActive();
+    bool isIdle(int ms) const;
 
    private:
     int m_fd{-1};
     int m_user_id{-1};
     Reactor* m_reactor;
     std::string m_read_buf;
+    std::chrono::steady_clock::time_point m_last_active{
+        std::chrono::steady_clock::now()};
 };
