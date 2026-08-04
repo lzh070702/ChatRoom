@@ -27,8 +27,13 @@ void Reactor ::loop() {
             if (events[i].data.ptr == &m_wakeup_fd) {
                 handleWakeup();
             } else {
-                Connection* conn = static_cast<Connection*>(events[i].data.ptr);
-                int fd = conn->getFd();
+                Connection* raw = static_cast<Connection*>(events[i].data.ptr);
+                int fd = raw->getFd();
+                auto it = m_conns.find(fd);
+                if (it == m_conns.end()) {
+                    continue;
+                }
+                auto conn = it->second;
                 if (events[i].events & (EPOLLRDHUP | EPOLLERR | EPOLLHUP)) {
                     handleClose(conn);
                 } else if (events[i].events & EPOLLIN) {
@@ -69,38 +74,37 @@ void Reactor ::handleWakeup() {
     for (const auto& fd : cfds) {
         fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
         ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
-        Connection* conn = new Connection(fd, this);
-        ev.data.ptr = conn;
+        auto conn = std::make_shared<Connection>(fd, this);
+        ev.data.ptr = conn.get();
         if (epoll_ctl(m_epfd, EPOLL_CTL_ADD, fd, &ev) == 0) {
+            m_conns[fd] = conn;
             m_conn_cnt++;
-        } else {
-            delete conn;
         }
     }
 }
 
-void Reactor ::handleClose(Connection* conn) {
+void Reactor ::handleClose(std::shared_ptr<Connection> conn) {
     epoll_ctl(m_epfd, EPOLL_CTL_DEL, conn->getFd(), nullptr);
     ChatService::instance().logout(conn);
     conn->setUserId(-1);
-    delete conn;
+    m_conns.erase(conn->getFd());
     m_conn_cnt--;
 }
 
-void Reactor ::handleRead(Connection* conn) {
-    std::string data;
-    if (!conn->recvData(data)) {
+void Reactor ::handleRead(std::shared_ptr<Connection> conn) {
+    if (!conn->recvData()) {
         handleClose(conn);
         return;
     }
-    if (data.empty()) {
-        return;
+    std::string msg;
+    while (conn->getMessage(msg)) {
+        auto js = json::parse(msg);
+        ChatService::instance().handle(conn, js);
     }
-    auto js = json::parse(data);
-    ChatService::instance().handle(conn, js);
 }
 
-void Reactor ::handleWrite(Connection* conn, const std::string& data) {
+void Reactor ::handleWrite(std::shared_ptr<Connection> conn,
+                           const std::string& data) {
     if (data.empty()) {
         return;
     }

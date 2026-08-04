@@ -15,6 +15,7 @@ class FriendModel {
     bool addFriend(int user_id, int friend_id);
     std::vector<User> queryFriends(int user_id);
     int isFriend(int user_id, int friend_id);
+    bool removeAll(int user_id);
 
    private:
     MySQL m_mysql;

@@ -101,3 +101,11 @@ int FriendModel::isFriend(int user_id, int friend_id) {
     }
     return -1;
 }
+
+bool FriendModel::removeAll(int user_id) {
+    char sql[1024] = {0};
+    snprintf(sql, sizeof(sql),
+             "DELETE FROM friend WHERE user_id = %d OR friend_id = %d;",
+             user_id, user_id);
+    return m_mysql.update(sql);
+}

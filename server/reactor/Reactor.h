@@ -2,7 +2,9 @@
 
 #include <sys/epoll.h>
 #include <atomic>
+#include <memory>
 #include <mutex>
+#include <unordered_map>
 #include <vector>
 
 #include "../net/Connection.h"
@@ -18,12 +20,12 @@ class Reactor {
     void pushFd(int fd);
     int getWakeupFd() const;
     int getConnCnt() const;
-    void handleWrite(Connection* conn, const std::string& data);
+    void handleWrite(std::shared_ptr<Connection> conn, const std::string& data);
 
    private:
     void handleWakeup();
-    void handleClose(Connection* conn);
-    void handleRead(Connection* conn);
+    void handleClose(std::shared_ptr<Connection> conn);
+    void handleRead(std::shared_ptr<Connection> conn);
 
    private:
     int m_epfd;
@@ -31,6 +33,7 @@ class Reactor {
     std::atomic<int> m_conn_cnt{0};
     std::mutex m_mtx;
     std::vector<int> m_cds;
+    std::unordered_map<int, std::shared_ptr<Connection>> m_conns;
 
     static constexpr int MAX_EVENTS = 1024;
 };

@@ -12,7 +12,8 @@ class Connection {
     explicit Connection(int fd, Reactor* reactor);
     ~Connection();
     int getFd() const;
-    bool recvData(std::string& data);
+    bool recvData();
+    bool getMessage(std::string& msg);
     bool sendData(const std::string& data);
     void closeFd();
     bool isClosed() const;
@@ -24,4 +25,5 @@ class Connection {
     int m_fd{-1};
     int m_user_id{-1};
     Reactor* m_reactor;
+    std::string m_read_buf;
 };

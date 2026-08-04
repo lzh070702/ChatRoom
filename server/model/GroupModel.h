@@ -18,10 +18,11 @@ class GroupModel {
     bool applyGroup(int group_id, int user_id, std::vector<int>& users);
     bool processGroupRequest(int group_id, int user_id, bool agree);
     int getRole(int group_id, int user_id);
+    bool addMember(int group_id, int user_id, int role);
     bool delMember(int group_id, int user_id);
     bool dissolveGroup(int group_id);
-    bool promoteAdmin(int group_id, int target_id);
-    bool demoteAdmin(int group_id, int target_id);
+    bool setRole(int group_id, int target_id, int role);
+    bool removeFromAll(int user_id);
 
    private:
     MySQL m_mysql;

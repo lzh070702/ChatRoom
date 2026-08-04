@@ -63,3 +63,17 @@ bool UserModel::updateState(int id, int state) {
 bool UserModel::resetState() {
     return m_mysql.update("UPDATE user SET state = 0;");
 }
+
+bool UserModel::updatePassword(int id, const std::string& password) {
+    char sql[1024] = {0};
+    snprintf(sql, sizeof(sql),
+             "UPDATE user SET password = '%s' WHERE id = %d;",
+             password.c_str(), id);
+    return m_mysql.update(sql);
+}
+
+bool UserModel::remove(int id) {
+    char sql[1024] = {0};
+    snprintf(sql, sizeof(sql), "DELETE FROM user WHERE id = %d;", id);
+    return m_mysql.update(sql);
+}

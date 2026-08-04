@@ -1,19 +1,24 @@
 #include <iostream>
-#include <thread>
+#include <unistd.h>
+
+#include "pool.h"
 #include "reactor/Reactor.h"
 #include "net/TcpServer.h"
 #include "net/Connection.h"
-#include <unistd.h>
+
 
 using namespace std;
 
 const int SUB_CNT = 4;
 
 int main() {
+    pool thread_pool(SUB_CNT);
     vector<unique_ptr<Reactor>> subs(SUB_CNT);
     for (int i = 0; i < SUB_CNT; i++) {
         subs[i] = make_unique<Reactor>();
-        thread([subs_i = subs[i].get()]() { subs_i->loop(); }).detach();
+        thread_pool.enqueue([reactor = subs[i].get()]() {
+            reactor->loop();
+        });
     }
 
     TcpServer server(8888);

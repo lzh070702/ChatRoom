@@ -138,6 +138,15 @@ bool GroupModel::processGroupRequest(int group_id, int user_id, bool agree) {
     return m_mysql.update(sql);
 }
 
+bool GroupModel::addMember(int group_id, int user_id, int role) {
+    char sql[1024] = {0};
+    snprintf(sql, sizeof(sql),
+             "INSERT INTO group_user(group_id, user_id, role) "
+             "VALUES(%d, %d, %d);",
+             group_id, user_id, role);
+    return m_mysql.update(sql);
+}
+
 bool GroupModel::delMember(int group_id, int user_id) {
     char sql[1024] = {0};
     snprintf(sql, sizeof(sql),
@@ -171,21 +180,12 @@ bool GroupModel::dissolveGroup(int group_id) {
     }
 }
 
-bool GroupModel::promoteAdmin(int group_id, int target_id) {
+bool GroupModel::setRole(int group_id, int target_id, int role) {
     char sql[1024] = {0};
     snprintf(sql, sizeof(sql),
-             "UPDATE group_user SET role = 2 "
+             "UPDATE group_user SET role = %d "
              "WHERE group_id = %d AND user_id = %d;",
-             group_id, target_id);
-    return m_mysql.update(sql);
-}
-
-bool GroupModel::demoteAdmin(int group_id, int target_id) {
-    char sql[1024] = {0};
-    snprintf(sql, sizeof(sql),
-             "UPDATE group_user SET role = 1 "
-             "WHERE group_id = %d AND user_id = %d;",
-             group_id, target_id);
+             role, group_id, target_id);
     return m_mysql.update(sql);
 }
 
@@ -199,4 +199,22 @@ int GroupModel::getRole(int group_id, int user_id) {
         return std::stoi(m_mysql.value(0));
     }
     return -1;
+}
+
+bool GroupModel::removeFromAll(int user_id) {
+    char sql[1024] = {0};
+    // 删除属于该用户创建的群（先删成员再删群信息）
+    snprintf(sql, sizeof(sql),
+             "DELETE gu FROM group_user gu "
+             "INNER JOIN group_info g ON gu.group_id = g.id "
+             "WHERE g.owner_id = %d;",
+             user_id);
+    m_mysql.update(sql);
+    snprintf(sql, sizeof(sql),
+             "DELETE FROM group_info WHERE owner_id = %d;", user_id);
+    m_mysql.update(sql);
+    // 删除该用户在其他群中的成员记录
+    snprintf(sql, sizeof(sql),
+             "DELETE FROM group_user WHERE user_id = %d;", user_id);
+    return m_mysql.update(sql);
 }

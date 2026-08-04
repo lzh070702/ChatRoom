@@ -1,11 +1,13 @@
 #pragma once
 
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <unordered_map>
 
 #include "../database/Redis.h"
+#include "../email/EmailSender.h"
 #include "../model/FriendModel.h"
 #include "../model/GroupModel.h"
 #include "../model/MessageModel.h"
@@ -22,41 +24,50 @@ class ChatService {
     ChatService& operator=(const ChatService&) = delete;
 
     static ChatService& instance();
-    void handle(Connection* conn, const json& js);
-    void logout(Connection* conn);
+    void handle(std::shared_ptr<Connection> conn, const json& js);
+    void logout(std::shared_ptr<Connection> conn);
 
    private:
     ChatService();
-
-    void signIn(Connection* conn, const json& js);
-    void signUp(Connection* conn, const json& js);
-    void sendRequest(Connection* conn, const json& js);
-    void processRequest(Connection* conn, const json& js);
-    void queryFriends(Connection* conn, const json& js);
-    void deleteFriend(Connection* conn, const json& js);
-    void oneChat(Connection* conn, const json& js);
-    void queryHistory(Connection* conn, const json& js);
-    void createGroup(Connection* conn, const json& js);
-    void queryGroups(Connection* conn, const json& js);
-    void applyGroups(Connection* conn, const json& js);
-    void processGroupRequest(Connection* conn, const json& js);
-    void queryMembers(Connection* conn, const json& js);
-    void groupChat(Connection* conn, const json& js);
-    void queryGroupHistory(Connection* conn, const json& js);
-    void quitGroup(Connection* conn, const json& js);
-    void dissolveGroup(Connection* conn, const json& js);
-    void promoteAdmin(Connection* conn, const json& js);
-    void demoteAdmin(Connection* conn, const json& js);
-    void kickMember(Connection* conn, const json& js);
+    void signUp(std::shared_ptr<Connection> conn, const json& js);
+    void signIn(std::shared_ptr<Connection> conn, const json& js);
+    void sendCode(std::shared_ptr<Connection> conn, const json& js);
+    void codeLogin(std::shared_ptr<Connection> conn, const json& js);
+    void forgotPassword(std::shared_ptr<Connection> conn, const json& js);
+    void signOut(std::shared_ptr<Connection> conn, const json& js);
+    void queryFriends(std::shared_ptr<Connection> conn, const json& js);
+    void sendRequest(std::shared_ptr<Connection> conn, const json& js);
+    void processRequest(std::shared_ptr<Connection> conn, const json& js);
+    void blockFriend(std::shared_ptr<Connection> conn, const json& js);
+    void deleteFriend(std::shared_ptr<Connection> conn, const json& js);
+    void oneChat(std::shared_ptr<Connection> conn, const json& js);
+    void queryHistory(std::shared_ptr<Connection> conn, const json& js);
+    void queryGroups(std::shared_ptr<Connection> conn, const json& js);
+    void createGroup(std::shared_ptr<Connection> conn, const json& js);
+    void inviteToGroup(std::shared_ptr<Connection> conn, const json& js);
+    void applyGroups(std::shared_ptr<Connection> conn, const json& js);
+    void processGroupRequest(std::shared_ptr<Connection> conn, const json& js);
+    void queryMembers(std::shared_ptr<Connection> conn, const json& js);
+    void setAdmin(std::shared_ptr<Connection> conn, const json& js);
+    void kickMember(std::shared_ptr<Connection> conn, const json& js);
+    void quitGroup(std::shared_ptr<Connection> conn, const json& js);
+    void dissolveGroup(std::shared_ptr<Connection> conn, const json& js);
+    void groupChat(std::shared_ptr<Connection> conn, const json& js);
+    void queryGroupHistory(std::shared_ptr<Connection> conn, const json& js);
 
    private:
-    using handler = std::function<void(Connection*, const json&)>;
+    using handler =
+        std::function<void(std::shared_ptr<Connection>, const json&)>;
     std::unordered_map<int, handler> m_handlers;
+
     Redis m_redis;
     UserModel m_user_model;
     FriendModel m_friend_model;
     GroupModel m_group_model;
     MessageModel m_message_model;
-    std::unordered_map<int, Connection*> m_user_conn;
+    EmailSender m_email_sender;
+    std::unordered_map<int, std::weak_ptr<Connection>> m_user_conn;
     std::mutex m_mutex;
+    std::unordered_map<std::string, std::string> m_codes;
+    std::mutex m_code_mutex;
 };

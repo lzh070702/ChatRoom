@@ -17,6 +17,7 @@ class MessageModel {
                 const std::string& msg);
     std::vector<json> queryHistory(int user_id, int friend_id);
     std::vector<json> queryGroupHistory(int group_id);
+    bool removeAll(int user_id);
 
    private:
     MySQL m_mysql;

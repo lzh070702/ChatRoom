@@ -13,16 +13,15 @@ int Connection::getFd() const {
     return m_fd;
 }
 
-bool Connection::recvData(std::string& data) {
+bool Connection::recvData() {
     if (m_fd == -1) {
         return false;
     }
-    data.clear();
     char buf[4096];
     while (true) {
         ssize_t n = read(m_fd, buf, sizeof(buf));
         if (n > 0) {
-            data.append(buf, static_cast<size_t>(n));
+            m_read_buf.append(buf, static_cast<size_t>(n));
         } else if (n == 0 ||
                    (n < 0 && (errno != EAGAIN && errno != EWOULDBLOCK))) {
             return false;
@@ -32,7 +31,17 @@ bool Connection::recvData(std::string& data) {
             break;
         }
     }
-    return !data.empty();
+    return true;
+}
+
+bool Connection::getMessage(std::string& msg) {
+    size_t pos = m_read_buf.find('\n');
+    if (pos == std::string::npos) {
+        return false;
+    }
+    msg = m_read_buf.substr(0, pos);
+    m_read_buf.erase(0, pos + 1);
+    return true;
 }
 
 bool Connection::sendData(const std::string& data) {

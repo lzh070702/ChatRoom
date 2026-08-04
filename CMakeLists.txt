@@ -9,7 +9,9 @@ set(SERVER_SRCS
     server/main.cc
     server/database/MySQL.cc
     server/database/Redis.cc
+    server/email/EmailSender.cc
     server/model/FriendModel.cc
+    server/model/GroupModel.cc
     server/model/MessageModel.cc
     server/model/User.cc
     server/model/UserModel.cc
@@ -29,6 +31,7 @@ target_include_directories(server PRIVATE
 target_link_libraries(server PRIVATE
     mysqlclient
     hiredis
+    curl
 )
 
 #mkdir build && cd build && cmake .. && make
