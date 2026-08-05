@@ -1,6 +1,7 @@
-#include "Connection.h"
 #include <unistd.h>
 #include <cerrno>
+
+#include "Connection.h"
 
 Connection::Connection(int fd, Reactor* reactor)
     : m_fd(fd), m_reactor(reactor) {}

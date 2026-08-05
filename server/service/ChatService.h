@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 #include <unordered_map>
 
+#include "../database/MySQLPool.h"
 #include "../database/Redis.h"
 #include "../email/EmailSender.h"
 #include "../model/FriendModel.h"
@@ -29,6 +30,7 @@ class ChatService {
 
    private:
     ChatService();
+    
     void heartbeat(std::shared_ptr<Connection> conn, const json& js);
     void signUp(std::shared_ptr<Connection> conn, const json& js);
     void signIn(std::shared_ptr<Connection> conn, const json& js);
@@ -56,11 +58,13 @@ class ChatService {
     void groupChat(std::shared_ptr<Connection> conn, const json& js);
     void queryGroupHistory(std::shared_ptr<Connection> conn, const json& js);
     void pullFile(std::shared_ptr<Connection> conn, const json& js);
+
     std::string base64Encode(const std::string& data);
     std::string base64Decode(const std::string& encoded);
     void saveFile(int message_id,
                   const std::string& file_name,
                   const std::string& file_data);
+    std::string sha256(const std::string& input);
 
    private:
     using handler =
@@ -68,6 +72,7 @@ class ChatService {
     std::unordered_map<int, handler> m_handlers;
 
     Redis m_redis;
+    MySQLPool m_mysql_pool;
     UserModel m_user_model;
     FriendModel m_friend_model;
     GroupModel m_group_model;

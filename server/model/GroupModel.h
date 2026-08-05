@@ -7,9 +7,11 @@
 
 using json = nlohmann::json;
 
+class MySQLPool;
+
 class GroupModel {
    public:
-    GroupModel();
+    GroupModel(MySQLPool* pool);
     bool createGroup(std::string name, int owner_id, int& group_id);
     std::vector<json> queryGroups(int user_id);
     std::vector<int> queryMembers(int group_id);

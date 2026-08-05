@@ -3,8 +3,8 @@
 
 #include "UserModel.h"
 
-UserModel::UserModel() {
-    m_mysql.connect("chatserver", "123456", "chatroom", "127.0.0.1");
+UserModel::UserModel(MySQLPool* pool) {
+    m_mysql.setPool(pool);
 }
 
 bool UserModel::insert(User& user) {

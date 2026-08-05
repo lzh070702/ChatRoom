@@ -1,7 +1,7 @@
 #include "MessageModel.h"
 
-MessageModel::MessageModel() {
-    m_mysql.connect("chatserver", "123456", "chatroom", "127.0.0.1");
+MessageModel::MessageModel(MySQLPool* pool) {
+    m_mysql.setPool(pool);
 }
 
 int MessageModel::insert(int sender_id,
@@ -15,10 +15,7 @@ int MessageModel::insert(int sender_id,
              "is_file) "
              "VALUES(%d,%d,%d,'%s',%d);",
              sender_id, receiver_id, type, msg.c_str(), is_file ? 1 : 0);
-    if (!m_mysql.update(sql)) {
-        return -1;
-    }
-    return static_cast<int>(m_mysql.getInsertId());
+    return m_mysql.updateAndGetId(sql);
 }
 
 std::vector<json> MessageModel::queryHistory(int user_id, int friend_id) {

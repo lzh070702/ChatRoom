@@ -6,9 +6,11 @@
 #include "User.h"
 #include "UserModel.h"
 
+class MySQLPool;
+
 class FriendModel {
    public:
-    FriendModel();
+    FriendModel(MySQLPool* pool);
     bool insert(int user_id, int friend_id);
     bool deleteFriend(int user_id, int friend_id);
     bool updateStatus(int user_id, int friend_id, int status);

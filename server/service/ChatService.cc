@@ -1,4 +1,5 @@
 #include <glog/logging.h>
+#include <openssl/sha.h>
 #include <fstream>
 #include <iomanip>
 #include <random>
@@ -35,7 +36,12 @@ void ChatService::logout(std::shared_ptr<Connection> conn) {
     m_user_conn.erase(id);
 }
 
-ChatService::ChatService() {
+ChatService::ChatService()
+    : m_user_model(&m_mysql_pool)
+    , m_friend_model(&m_mysql_pool)
+    , m_group_model(&m_mysql_pool)
+    , m_message_model(&m_mysql_pool) {
+    m_mysql_pool.init(4, "chatserver", "123456", "chatroom", "127.0.0.1");
     m_handlers[0] = [this](std::shared_ptr<Connection> c, const json& j) {
         heartbeat(c, j);
     };
@@ -133,7 +139,7 @@ void ChatService::signUp(std::shared_ptr<Connection> conn, const json& js) {
     }
     user.setName(js["name"]);
     user.setEmail(email);
-    user.setPassword(js["password"]);
+    user.setPassword(sha256(js["password"]));
     user.setState(0);
     if (m_user_model.insert(user)) {
         conn->getReactor()->handleWrite(
@@ -152,7 +158,7 @@ void ChatService::signIn(std::shared_ptr<Connection> conn, const json& js) {
             conn, R"({"type":2,"code":0,"msg":"该账号不存在"})");
         return;
     }
-    if (user.getPassword() != js["password"]) {
+    if (user.getPassword() != sha256(js["password"])) {
         conn->getReactor()->handleWrite(
             conn, R"({"type":2,"code":0,"msg":"密码错误"})");
         return;
@@ -334,7 +340,7 @@ void ChatService::changePassword(std::shared_ptr<Connection> conn,
             conn, R"({"type":5,"code":0,"msg":"邮箱未注册"})");
         return;
     }
-    if (!m_user_model.updatePassword(user.getId(), password)) {
+    if (!m_user_model.updatePassword(user.getId(), sha256(password))) {
         conn->getReactor()->handleWrite(
             conn, R"({"type":5,"code":0,"msg":"密码修改失败"})");
         return;
@@ -1022,4 +1028,16 @@ std::string ChatService::base64Decode(const std::string& encoded) {
         }
     }
     return decoded;
+}
+
+std::string ChatService::sha256(const std::string& input) {
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256(reinterpret_cast<const unsigned char*>(input.c_str()), input.size(),
+           hash);
+    std::ostringstream oss;
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        oss << std::hex << std::setw(2) << std::setfill('0')
+            << static_cast<int>(hash[i]);
+    }
+    return oss.str();
 }

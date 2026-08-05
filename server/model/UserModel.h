@@ -3,9 +3,11 @@
 #include "../database/MySQL.h"
 #include "User.h"
 
+class MySQLPool;
+
 class UserModel {
    public:
-    UserModel();
+    UserModel(MySQLPool* pool);
     bool insert(User& user);
     bool queryById(int id, User& user);
     bool queryByEmail(const std::string& email, User& user);

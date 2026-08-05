@@ -1,32 +1,28 @@
 #pragma once
+
 #include <mysql/mysql.h>
-#include <chrono>
 #include <string>
+
+#include "MySQLPool.h"
 
 class MySQL {
    public:
-    MySQL();
     ~MySQL();
 
-    bool connect(const std::string& user,
-                 const std::string& passwd,
-                 const std::string& dbName,
-                 const std::string& ip,
-                 unsigned short port = 3306);
+    void setPool(MySQLPool* pool);
     bool update(const std::string& sql);
+    int updateAndGetId(const std::string& sql);
     bool query(const std::string& sql);
     bool next();
     std::string value(int index);
-    bool transaction();
-    bool commit();
-    bool rollback();
-    unsigned long long getInsertId();
+    MYSQL* transaction();
+    bool commit(MYSQL* conn);
+    bool rollback(MYSQL* conn);
 
    private:
     void freeResult();
 
-    MYSQL* m_conn = nullptr;
+    MySQLPool* m_pool = nullptr;
     MYSQL_RES* m_result = nullptr;
     MYSQL_ROW m_row = nullptr;
-    std::chrono::steady_clock::time_point m_aliveTime;
 };

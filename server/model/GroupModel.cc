@@ -1,38 +1,32 @@
 #include "GroupModel.h"
 
-GroupModel::GroupModel() {
-    m_mysql.connect("chatserver", "123456", "chatroom", "127.0.0.1");
+GroupModel::GroupModel(MySQLPool* pool) {
+    m_mysql.setPool(pool);
 }
 
 bool GroupModel::createGroup(std::string name, int owner_id, int& group_id) {
-    char sql[1024] = {0};
-    if (!m_mysql.transaction()) {
+    MYSQL* conn;
+    if ((conn = m_mysql.transaction()) == nullptr) {
         return false;
     }
-    bool success = true;
+    char sql[1024] = {0};
     snprintf(sql, sizeof(sql),
              "INSERT INTO group_info(name, owner_id) "
              "VALUES('%s',%d);",
              name.c_str(), owner_id);
 
-    if (m_mysql.update(sql)) {
-        group_id = m_mysql.getInsertId();
+    if (mysql_query(conn, sql) == 0) {
+        group_id = static_cast<int>(mysql_insert_id(conn));
         snprintf(sql, sizeof(sql),
                  "INSERT INTO group_user(group_id,user_id,role)"
                  "VALUES(%d, %d, 3);",
                  group_id, owner_id);
-        if (!m_mysql.update(sql)) {
-            success = false;
+        if (mysql_query(conn, sql) == 0 && m_mysql.commit(conn)) {
+            return true;
         }
-    } else {
-        success = false;
     }
-    if (success && m_mysql.commit()) {
-        return true;
-    } else {
-        m_mysql.rollback();
-        return false;
-    }
+    m_mysql.rollback(conn);
+    return false;
 }
 
 std::vector<json> GroupModel::queryGroups(int user_id) {
@@ -157,27 +151,24 @@ bool GroupModel::delMember(int group_id, int user_id) {
 }
 
 bool GroupModel::dissolveGroup(int group_id) {
-    if (!m_mysql.transaction()) {
+    MYSQL* conn;
+    if ((conn = m_mysql.transaction()) == nullptr) {
         return false;
     }
     char sql[1024] = {0};
-    bool success = true;
     snprintf(sql, sizeof(sql), "DELETE FROM group_user WHERE group_id = %d;",
              group_id);
-    if (!m_mysql.update(sql)) {
-        success = false;
+    if (mysql_query(conn, sql)) {
+        m_mysql.rollback(conn);
+        return false;
     }
     snprintf(sql, sizeof(sql), "DELETE FROM group_info WHERE id = %d;",
              group_id);
-    if (!m_mysql.update(sql)) {
-        success = false;
-    }
-    if (success && m_mysql.commit()) {
+    if (mysql_query(conn, sql) == 0 && m_mysql.commit(conn)) {
         return true;
-    } else {
-        m_mysql.rollback();
-        return false;
     }
+    m_mysql.rollback(conn);
+    return false;
 }
 
 bool GroupModel::setRole(int group_id, int target_id, int role) {

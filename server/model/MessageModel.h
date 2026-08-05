@@ -8,9 +8,11 @@
 
 using json = nlohmann::json;
 
+class MySQLPool;
+
 class MessageModel {
    public:
-    MessageModel();
+    MessageModel(MySQLPool* pool);
     int insert(int sender_id,
                int receiver_id,
                int type,

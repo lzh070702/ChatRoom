@@ -3,11 +3,15 @@
 #include <cstdio>
 #include <string>
 
-FriendModel::FriendModel() {
-    m_mysql.connect("chatserver", "123456", "chatroom", "127.0.0.1");
+FriendModel::FriendModel(MySQLPool* pool) : m_user_model(pool) {
+    m_mysql.setPool(pool);
 }
 
 bool FriendModel::insert(int user_id, int friend_id) {
+    MYSQL* conn;
+    if ((conn = m_mysql.transaction()) == nullptr) {
+        return false;
+    }
     char sql1[1024] = {0};
     snprintf(sql1, sizeof(sql1),
              "INSERT INTO friend(user_id, friend_id, status) "
@@ -18,13 +22,11 @@ bool FriendModel::insert(int user_id, int friend_id) {
              "INSERT INTO friend(user_id, friend_id, status) "
              "VALUES(%d,%d,%d);",
              friend_id, user_id, 0);
-    if (!m_mysql.transaction()) {
-        return false;
-    }
-    if (m_mysql.update(sql1) && m_mysql.update(sql2) && m_mysql.commit()) {
+    if (mysql_query(conn, sql1) == 0 && mysql_query(conn, sql2) == 0 &&
+        m_mysql.commit(conn)) {
         return true;
     } else {
-        m_mysql.rollback();
+        m_mysql.rollback(conn);
         return false;
     }
 }
@@ -49,6 +51,10 @@ bool FriendModel::updateStatus(int user_id, int friend_id, int status) {
 }
 
 bool FriendModel::addFriend(int user_id, int friend_id) {
+    MYSQL* conn;
+    if ((conn = m_mysql.transaction()) == nullptr) {
+        return false;
+    }
     char sql1[1024] = {0};
     snprintf(sql1, sizeof(sql1),
              "UPDATE friend SET status = 2 "
@@ -59,13 +65,11 @@ bool FriendModel::addFriend(int user_id, int friend_id) {
              "UPDATE friend SET status = 2 "
              "WHERE user_id = %d AND friend_id = %d;",
              friend_id, user_id);
-    if (!m_mysql.transaction()) {
-        return false;
-    }
-    if (m_mysql.update(sql1) && m_mysql.update(sql2) && m_mysql.commit()) {
+    if (mysql_query(conn, sql1) == 0 && mysql_query(conn, sql2) == 0 &&
+        m_mysql.commit(conn)) {
         return true;
     } else {
-        m_mysql.rollback();
+        m_mysql.rollback(conn);
         return false;
     }
 }

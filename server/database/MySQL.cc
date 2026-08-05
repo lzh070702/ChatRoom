@@ -2,44 +2,47 @@
 
 #include "MySQL.h"
 
-MySQL::MySQL() {
-    m_conn = mysql_init(nullptr);
-    mysql_set_character_set(m_conn, "utf8");
-}
-
 MySQL::~MySQL() {
-    if (m_conn != nullptr) {
-        mysql_close(m_conn);
-    }
     freeResult();
 }
 
-bool MySQL::connect(const std::string& user,
-                    const std::string& passwd,
-                    const std::string& dbName,
-                    const std::string& ip,
-                    unsigned short port) {
-    MYSQL* ptr =
-        mysql_real_connect(m_conn, ip.c_str(), user.c_str(), passwd.c_str(),
-                           dbName.c_str(), port, nullptr, 0);
-    return ptr != nullptr;
+void MySQL::setPool(MySQLPool* pool) {
+    m_pool = pool;
 }
 
 bool MySQL::update(const std::string& sql) {
-    if (mysql_query(m_conn, sql.c_str())) {
-        LOG(ERROR) << "MySQL update failed: " << mysql_error(m_conn);
+    MYSQL* conn = m_pool->borrow();
+    if (mysql_query(conn, sql.c_str())) {
+        LOG(ERROR) << "MySQL update failed: " << mysql_error(conn);
+        m_pool->returnConn(conn);
         return false;
     }
+    m_pool->returnConn(conn);
     return true;
+}
+
+int MySQL::updateAndGetId(const std::string& sql) {
+    MYSQL* conn = m_pool->borrow();
+    if (mysql_query(conn, sql.c_str())) {
+        LOG(ERROR) << "MySQL update failed: " << mysql_error(conn);
+        m_pool->returnConn(conn);
+        return -1;
+    }
+    int id = static_cast<int>(mysql_insert_id(conn));
+    m_pool->returnConn(conn);
+    return id;
 }
 
 bool MySQL::query(const std::string& sql) {
     freeResult();
-    if (mysql_query(m_conn, sql.c_str())) {
-        LOG(ERROR) << "MySQL query failed: " << mysql_error(m_conn);
+    MYSQL* conn = m_pool->borrow();
+    if (mysql_query(conn, sql.c_str())) {
+        LOG(ERROR) << "MySQL query failed: " << mysql_error(conn);
+        m_pool->returnConn(conn);
         return false;
     }
-    m_result = mysql_store_result(m_conn);
+    m_result = mysql_store_result(conn);
+    m_pool->returnConn(conn);
     return true;
 }
 
@@ -63,20 +66,25 @@ std::string MySQL::value(int index) {
     return std::string(val, length);
 }
 
-bool MySQL::transaction() {
-    return mysql_autocommit(m_conn, false) == 0;
+MYSQL* MySQL::transaction() {
+    MYSQL* conn = m_pool->borrow();
+    if (mysql_autocommit(conn, false) != 0) {
+        m_pool->returnConn(conn);
+        return nullptr;
+    }
+    return conn;
 }
 
-bool MySQL::commit() {
-    return mysql_commit(m_conn) == 0;
+bool MySQL::commit(MYSQL* conn) {
+    bool res = mysql_commit(conn);
+    m_pool->returnConn(conn);
+    return res == 0;
 }
 
-bool MySQL::rollback() {
-    return mysql_rollback(m_conn) == 0;
-}
-
-unsigned long long MySQL::getInsertId() {
-    return mysql_insert_id(m_conn);
+bool MySQL::rollback(MYSQL* conn) {
+    bool res = mysql_rollback(conn);
+    m_pool->returnConn(conn);
+    return res == 0;
 }
 
 void MySQL::freeResult() {
