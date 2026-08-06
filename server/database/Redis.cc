@@ -7,6 +7,7 @@ Redis::Redis() {
 }
 
 bool Redis::lpush(const std::string& key, const std::string& value) {
+    std::lock_guard<std::mutex> lock(m_mutex);
     redisReply* reply = (redisReply*)redisCommand(m_conn, "LPUSH %s %s",
                                                   key.c_str(), value.c_str());
     if (reply == nullptr) {
@@ -19,6 +20,7 @@ bool Redis::lpush(const std::string& key, const std::string& value) {
 }
 
 bool Redis::rpop(const std::string& key, std::string& value) {
+    std::lock_guard<std::mutex> lock(m_mutex);
     redisReply* reply =
         (redisReply*)redisCommand(m_conn, "RPOP %s", key.c_str());
     if (reply == nullptr) {

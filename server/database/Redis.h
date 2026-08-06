@@ -1,4 +1,5 @@
 #include <hiredis/hiredis.h>
+#include <mutex>
 #include <string>
 
 class Redis {
@@ -9,4 +10,5 @@ class Redis {
 
    private:
     redisContext* m_conn;
+    std::mutex m_mutex;
 };
