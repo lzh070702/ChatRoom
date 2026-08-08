@@ -24,12 +24,12 @@ int main(int argc, char* argv[]) {
             reactor->loop();
         });
     }
-    TcpServer server(8888);
+    TcpServer server(8000);
     if (!server.start()) {
         LOG(ERROR) << "Server start failed";
         return -1;
     }
-    LOG(INFO) << "Server started on port 8888";
+    LOG(INFO) << "Server started on port 8000";
     int main_epfd = epoll_create1(0);
     epoll_event ev{}, events[1024];
     ev.events = EPOLLIN;
