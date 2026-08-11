@@ -1,123 +1,310 @@
-#include <arpa/inet.h>
-#include <string.h>
+#include <readline/readline.h>
 #include <sys/epoll.h>
-#include <sys/socket.h>
-#include <termios.h>
+#include <sys/eventfd.h>
 #include <unistd.h>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
+#include <deque>
 #include <iostream>
+#include <mutex>
+#include <nlohmann/json.hpp>
+#include <queue>
+#include <string>
+#include <thread>
+
+#include "net/TcpClient.h"
+#include "pool.h"
+
+using namespace std;
+using json = nlohmann::json;
+
+atomic<bool> g_running{true};
+
+mutex g_opt_mtx;
+queue<string> g_opt_que;
+int g_opt_efd;
+
+mutex g_ipt_mtx;
+queue<string> g_ipt_queu;
+condition_variable g_ipt_cv;
+
+mutex g_rsp_mtx;
+queue<json> g_rsp_queu;
+condition_variable g_rsp_cv;
+
+mutex g_ui_mutex;
+string g_prefix;
+
+void netLoop(TcpClient* client, pool* pool);
+void ioLoop();
+void on_line(char* line);
+void parseOpt(const string& msg);
+void printOpt();
+void pushOpt(const string& smsg);
+vector<string> popOpt();
+void pushIpt(const string& smsg);
+string popIpt();
+void pushRsp(const json& js);
+json popRsp();
+void setPrefix(const string& prefix);
+
+void home();
+void codelogin();
 
 int main(int argc, char* argv[]) {
-    const char* ip = argc > 1 ? argv[1] : "127.0.0.1";
-    int port = 8888;
-
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) {
-        perror("socket");
+    string host = (argc > 1) ? argv[1] : "127.0.0.1";
+    int port = (argc > 2) ? stoi(argv[2]) : 8000;
+    TcpClient client;
+    if (!client.connectServer(host, port)) {
+        cerr << "连接失败" << endl;
         return 1;
     }
+    g_opt_efd = eventfd(0, EFD_NONBLOCK);
 
-    sockaddr_in serv{};
-    serv.sin_family = AF_INET;
-    serv.sin_port = htons(port);
-    inet_pton(AF_INET, ip, &serv.sin_addr);
+    pool pool(4);
+    pool.enqueue(netLoop, &client, &pool);
+    pool.enqueue(ioLoop);
+    pool.enqueue(home);
+    return 0;
+}
 
-    if (connect(sock, (sockaddr*)&serv, sizeof(serv)) < 0) {
-        perror("connect");
-        return 1;
-    }
-
-    // 保存原始终端属性，设为非规范模式（关闭行缓冲和回显）
-    struct termios orig_term;
-    tcgetattr(STDIN_FILENO, &orig_term);
-    struct termios raw = orig_term;
-    raw.c_iflag &= ~(ICRNL);         // 禁止将 \r 转为 \n
-    raw.c_lflag &= ~(ICANON | ECHO);
-    raw.c_cc[VMIN] = 0;   // read 非阻塞
-    raw.c_cc[VTIME] = 0;
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
-
-    std::cout << "[Client] connected to " << ip << ":" << port << std::endl;
-    std::cout << "[Client] type 'exit' to quit" << std::endl;
-    std::cout << "> " << std::flush;
-
-    // 创建 epoll，只监听 socket
+void netLoop(TcpClient* client, pool* pool) {
     int epfd = epoll_create1(0);
-    if (epfd < 0) {
-        perror("epoll_create1");
-        return 1;
-    }
-
     epoll_event ev{};
     ev.events = EPOLLIN;
-    ev.data.fd = sock;
-    epoll_ctl(epfd, EPOLL_CTL_ADD, sock, &ev);
+    ev.data.fd = client->getFd();
+    epoll_ctl(epfd, EPOLL_CTL_ADD, client->getFd(), &ev);
 
-    char input_buf[1024];  // 用户输入缓冲区
-    int  input_len = 0;    // 缓冲区中已输入的字符数
-    bool running = true;
-
-    while (running) {
-        // 1. 非阻塞逐字节读取终端输入
-        char c;
-        while (read(STDIN_FILENO, &c, 1) > 0) {
-            if (c == '\n') continue;       // 忽略 LF
-            if (c == '\r') {               // CR = 回车
-                std::cout << "\r\n" << std::flush;
-                if (input_len > 0) {
-                    if (strncmp(input_buf, "exit", 4) == 0 &&
-                        input_len == 4) {
-                        running = false;
-                        break;
-                    }
-                    write(sock, input_buf, input_len);
-                    input_len = 0;
-                }
-                std::cout << "> " << std::flush;
-            } else if (c == 127 || c == '\b') {  // 退格
-                if (input_len > 0) {
-                    input_len--;
-                    std::cout << "\b \b" << std::flush;
-                }
-            } else if (input_len < (int)sizeof(input_buf) - 1) {
-                input_buf[input_len++] = c;
-                std::cout << c << std::flush;
+    epoll_event events[4];
+    while (g_running) {
+        int n = epoll_wait(epfd, events, 4, 500);
+        for (int i = 0; i < n; ++i) {
+            if (events[i].data.fd != client->getFd()) {
+                continue;
+            }
+            string msg = client->recvData();
+            while (!msg.empty()) {
+                pool->enqueue(parseOpt, msg);
+                msg = client->recvData();
             }
         }
-        if (!running) break;
+    }
+    close(epfd);
+}
 
-        // 2. epoll 等待 socket 数据（50ms 超时）
-        epoll_event events[1];
-        int nfds = epoll_wait(epfd, events, 1, 50);
-        for (int i = 0; i < nfds; ++i) {
-            if (events[i].data.fd == sock) {
-                char rbuf[1024];
-                ssize_t n = recv(sock, rbuf, sizeof(rbuf) - 1, 0);
-                if (n > 0) {
-                    rbuf[n] = '\0';
-                    // 清除当前行（光标回到行首，擦除整行）
-                    std::cout << "\r\033[2K";
-                    // 打印服务器消息
-                    std::cout << "[Server] " << rbuf;
-                    // 恢复提示符和之前已输入的内容
-                    std::cout << "\n> ";
-                    if (input_len > 0)
-                        std::cout.write(input_buf, input_len);
-                    std::cout << std::flush;
-                } else if (n == 0) {
-                    std::cout << "\r\033[2K[Client] server closed connection"
-                              << std::endl;
-                    running = false;
-                    break;
-                } else {
-                    perror("recv");
-                }
+void ioLoop() {
+    int epfd = epoll_create1(0);
+    epoll_event ev{};
+    ev.events = EPOLLIN;
+    ev.data.fd = STDIN_FILENO;
+    epoll_ctl(epfd, EPOLL_CTL_ADD, STDIN_FILENO, &ev);
+    ev.data.fd = g_opt_efd;
+    epoll_ctl(epfd, EPOLL_CTL_ADD, g_opt_efd, &ev);
+    rl_callback_handler_install("", on_line);
+    epoll_event events[2];
+    while (g_running) {
+        int n = epoll_wait(epfd, events, 2, 100);
+        if (n < 0) {
+            if (errno == EINTR)
+                continue;
+            break;
+        }
+        for (int i = 0; i < n; i++) {
+            if (events[i].data.fd == g_opt_efd) {
+                uint64_t val;
+                read(g_opt_efd, &val, sizeof(val));
+                printOpt();
+            } else if (events[i].data.fd == STDIN_FILENO) {
+                rl_callback_read_char();
             }
         }
     }
 
-    // 恢复终端属性
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_term);
+    rl_callback_handler_remove();
     close(epfd);
-    close(sock);
-    return 0;
+}
+
+void on_line(char* line) {
+    if (line == nullptr) {
+        g_running = false;
+        return;
+    }
+    string prefix;
+    {
+        lock_guard<mutex> lk(g_ui_mutex);
+        prefix = g_prefix;
+    }
+    if (*line) {
+        fprintf(rl_outstream, "\033[A\033[K%s %s\n", prefix.c_str(), line);
+        pushIpt(line);
+    } else {
+        fprintf(rl_outstream, "\033[A");
+    }
+    free(line);
+    rl_callback_handler_remove();
+    rl_callback_handler_install("", on_line);
+}
+
+void parseOpt(const string& msg) {
+    json js;
+    try {
+        js = json::parse(msg);
+    } catch (...) {
+        return;
+    }
+    int code = js["code"];
+    int type = js["type"];
+    if (code == 2) {
+        string rsp;
+        if (type == 8) {
+            rsp = string(js["name"]) + string(js["msg"]);
+        }
+        if (type == 12) {
+            rsp = "好友" + to_string(js["id"]) + "发来一条新消息";
+        }
+        if (type == 16) {
+            rsp = string(js["msg"]) + string(js["group_name"]);
+        }
+        if (type == 17) {
+            rsp = string(js["msg"]) + string(js["name"]);
+        }
+        if (type == 18) {
+            rsp = string(js["msg"]);
+        }
+        if (type == 24) {
+            rsp = "群聊" + to_string(js["group_id"]) + "发来一条新消息";
+        }
+        pushOpt(rsp + "\n");
+    }
+    pushRsp(js);
+}
+
+void printOpt() {
+    auto msgs = popOpt();
+    if (msgs.empty())
+        return;
+
+    int saved_point = rl_point;
+    char* saved_line = rl_copy_text(0, rl_end);
+    fprintf(rl_outstream, "\r\033[K");
+    for (auto& m : msgs) {
+        fprintf(rl_outstream, "%s", m.c_str());
+    }
+    rl_on_new_line();
+    rl_replace_line(saved_line, 0);
+    rl_point = saved_point;
+    rl_redisplay();
+    free(saved_line);
+    fflush(rl_outstream);
+}
+
+void pushOpt(const string& smsg) {
+    {
+        lock_guard<mutex> lk(g_opt_mtx);
+        g_opt_que.push(smsg);
+    }
+    uint64_t one = 1;
+    write(g_opt_efd, &one, sizeof(one));
+}
+
+vector<string> popOpt() {
+    lock_guard<mutex> lk(g_opt_mtx);
+    vector<string> msgs;
+    while (!g_opt_que.empty()) {
+        msgs.push_back(g_opt_que.front());
+        g_opt_que.pop();
+    }
+    return msgs;
+}
+
+void pushIpt(const string& smsg) {
+    {
+        lock_guard<mutex> lk(g_ipt_mtx);
+        g_ipt_queu.push(smsg);
+    }
+    g_ipt_cv.notify_one();
+}
+
+string popIpt() {
+    unique_lock<mutex> lk(g_ipt_mtx);
+    g_ipt_cv.wait(lk, [] { return !g_ipt_queu.empty() || !g_running; });
+    if (!g_running || g_ipt_queu.empty())
+        return "";
+    string s = g_ipt_queu.front();
+    g_ipt_queu.pop();
+    return s;
+}
+
+void pushRsp(const json& js) {
+    {
+        lock_guard<mutex> lk(g_rsp_mtx);
+        g_rsp_queu.push(js);
+    }
+    g_rsp_cv.notify_one();
+}
+
+json popRsp() {
+    unique_lock<mutex> lk(g_rsp_mtx);
+    g_rsp_cv.wait(lk, [] { return !g_rsp_queu.empty() || !g_running; });
+    if (!g_running || g_rsp_queu.empty())
+        return json();
+    json js = g_rsp_queu.front();
+    g_rsp_queu.pop();
+    return js;
+}
+
+void setPrefix(const string& prefix) {
+    lock_guard<mutex> lk(g_ui_mutex);
+    g_prefix = prefix;
+}
+
+void home() {
+    while (g_running) {
+        system("clear");
+        pushOpt("── 登录页面 ──\n");
+        pushOpt("1. 密码登录\n");
+        pushOpt("2. 验证码登录\n");
+        pushOpt("3. 注册\n");
+        pushOpt("请输入 1、2、3 或 /quit：");
+        setPrefix("选择：");
+        string input = popIpt();
+        if (!g_running || input.empty())
+            continue;
+
+        if (input == "/quit") {
+            g_running = false;
+            return;
+        }
+        if (input == "1") {
+            codelogin();
+        } else if (input == "2") {
+            pushOpt("── 验证码登录 ──\n");
+        } else if (input == "3") {
+            pushOpt("── 注册 ──\n");
+        }
+    }
+}
+
+void codelogin() {
+    while (g_running) {
+        system("clear");
+        pushOpt("── 密码登录 ──\n");
+        pushOpt("请输入qq邮箱：");
+        setPrefix("qq邮箱：");
+        string email = popIpt();
+        if(email == "q"){
+            return;
+        }
+        pushOpt("请输入密码：");
+        setPrefix("密码：");
+        string password = popIpt();
+        pushOpt("按下回车登录");
+        string a ;
+        cin >> a;
+    }
 }
