@@ -43,7 +43,7 @@ string g_prefix;
 void netLoop(TcpClient* client, pool* pool);
 void ioLoop();
 void on_line(char* line);
-void parseOpt(const string& msg);
+void parseOpt(const string& msg, chrono::steady_clock::time_point& last_recv);
 void printOpt();
 void pushOpt(const string& smsg);
 vector<string> popOpt();
@@ -53,8 +53,12 @@ void pushRsp(const json& js);
 json popRsp();
 void setPrefix(const string& prefix);
 
-void home();
-void codelogin();
+void authOptions(TcpClient& client);
+void signUp(TcpClient& client);
+void passwordSignIn(TcpClient& client);
+void codeSignIn(TcpClient& client);
+void home(TcpClient& client, const json& user);
+bool settings(TcpClient& client, const json& user);
 
 int main(int argc, char* argv[]) {
     string host = (argc > 1) ? argv[1] : "127.0.0.1";
@@ -69,7 +73,7 @@ int main(int argc, char* argv[]) {
     pool pool(4);
     pool.enqueue(netLoop, &client, &pool);
     pool.enqueue(ioLoop);
-    pool.enqueue(home);
+    authOptions(client);
     return 0;
 }
 
@@ -80,16 +84,30 @@ void netLoop(TcpClient* client, pool* pool) {
     ev.data.fd = client->getFd();
     epoll_ctl(epfd, EPOLL_CTL_ADD, client->getFd(), &ev);
 
+    auto last_send = chrono::steady_clock::now();
+    auto last_recv = chrono::steady_clock::now();
     epoll_event events[4];
     while (g_running) {
         int n = epoll_wait(epfd, events, 4, 500);
+        auto now = chrono::steady_clock::now();
+        if (now - last_send >= chrono::seconds(20)) {
+            client->sendData(R"({"type":0})");
+            last_send = now;
+        }
+        if (now - last_recv >= chrono::seconds(60)) {
+            pushOpt("与服务器断开连接\n");
+            g_running = false;
+            g_ipt_cv.notify_all();
+            g_rsp_cv.notify_all();
+            break;
+        }
         for (int i = 0; i < n; ++i) {
             if (events[i].data.fd != client->getFd()) {
                 continue;
             }
             string msg = client->recvData();
             while (!msg.empty()) {
-                pool->enqueue(parseOpt, msg);
+                parseOpt(msg, last_recv);
                 msg = client->recvData();
             }
         }
@@ -132,6 +150,8 @@ void ioLoop() {
 void on_line(char* line) {
     if (line == nullptr) {
         g_running = false;
+        g_ipt_cv.notify_all();
+        g_rsp_cv.notify_all();
         return;
     }
     string prefix;
@@ -140,7 +160,8 @@ void on_line(char* line) {
         prefix = g_prefix;
     }
     if (*line) {
-        fprintf(rl_outstream, "\033[A\033[K%s %s\n", prefix.c_str(), line);
+        fprintf(rl_outstream, "\033[A\033[A\033[K%s %s\n", prefix.c_str(),
+                line);
         pushIpt(line);
     } else {
         fprintf(rl_outstream, "\033[A");
@@ -150,15 +171,19 @@ void on_line(char* line) {
     rl_callback_handler_install("", on_line);
 }
 
-void parseOpt(const string& msg) {
+void parseOpt(const string& msg, chrono::steady_clock::time_point& last_recv) {
     json js;
     try {
         js = json::parse(msg);
     } catch (...) {
         return;
     }
-    int code = js["code"];
     int type = js["type"];
+    if (type == 0) {
+        last_recv = chrono::steady_clock::now();
+        return;
+    }
+    int code = js["code"];
     if (code == 2) {
         string rsp;
         if (type == 8) {
@@ -180,6 +205,7 @@ void parseOpt(const string& msg) {
             rsp = "群聊" + to_string(js["group_id"]) + "发来一条新消息";
         }
         pushOpt(rsp + "\n");
+        return;
     }
     pushRsp(js);
 }
@@ -263,48 +289,280 @@ void setPrefix(const string& prefix) {
     g_prefix = prefix;
 }
 
-void home() {
+void authOptions(TcpClient& client) {
     while (g_running) {
         system("clear");
-        pushOpt("── 登录页面 ──\n");
+        pushOpt("────── 登录页面 ──────\n");
+        pushOpt("======================\n");
         pushOpt("1. 密码登录\n");
         pushOpt("2. 验证码登录\n");
         pushOpt("3. 注册\n");
-        pushOpt("请输入 1、2、3 或 /quit：");
-        setPrefix("选择：");
+        pushOpt("4. 退出\n");
+        pushOpt("======================\n");
+        pushOpt("请选择:\n");
+        setPrefix("选择:");
         string input = popIpt();
         if (!g_running || input.empty())
             continue;
 
-        if (input == "/quit") {
-            g_running = false;
-            return;
-        }
         if (input == "1") {
-            codelogin();
+            passwordSignIn(client);
+            continue;
         } else if (input == "2") {
-            pushOpt("── 验证码登录 ──\n");
+            codeSignIn(client);
+            continue;
         } else if (input == "3") {
-            pushOpt("── 注册 ──\n");
+            signUp(client);
+            continue;
+        } else if (input == "4") {
+            g_running = false;
+            g_ipt_cv.notify_all();
+            g_rsp_cv.notify_all();
+            return;
         }
     }
 }
 
-void codelogin() {
+void signUp(TcpClient& client) {
     while (g_running) {
         system("clear");
-        pushOpt("── 密码登录 ──\n");
-        pushOpt("请输入qq邮箱：");
-        setPrefix("qq邮箱：");
+        pushOpt("──────── 注册 ────────\n");
+        pushOpt("======================\n");
+        pushOpt("请输入qq邮箱:\n");
+        setPrefix("qq邮箱:");
         string email = popIpt();
-        if(email == "q"){
+        pushOpt("请输入用户名:\n");
+        setPrefix("用户名:");
+        string name = popIpt();
+        pushOpt("请输入密码:\n");
+        setPrefix("密码:");
+        string password = popIpt();
+        pushOpt("======================\n");
+        pushOpt("1. 注册    2. 返回\n");
+        pushOpt("======================\n");
+        pushOpt("请选择:\n");
+        setPrefix("选择:");
+        if (popIpt() == "1") {
+            json req;
+            req["type"] = 1;
+            req["email"] = email;
+            req["name"] = name;
+            req["password"] = password;
+            client.sendData(req.dump());
+            json rsp = popRsp();
+            if (rsp["code"] == 1) {
+                pushOpt(string(rsp["msg"]) + "\n");
+                return;
+            } else {
+                pushOpt("======================\n");
+                pushOpt(string(rsp["msg"]) + "\n");
+                pushOpt("1. 重新注册    2. 返回\n");
+                pushOpt("======================\n");
+                pushOpt("请选择:\n");
+                setPrefix("选择:");
+                if (popIpt() != "1") {
+                    return;
+                }
+            }
+        } else {
             return;
         }
-        pushOpt("请输入密码：");
-        setPrefix("密码：");
-        string password = popIpt();
-        pushOpt("按下回车登录");
-        string a ;
-        cin >> a;
     }
+}
+
+void passwordSignIn(TcpClient& client) {
+    while (g_running) {
+        system("clear");
+        pushOpt("────── 密码登录 ──────\n");
+        pushOpt("======================\n");
+        pushOpt("请输入qq邮箱:\n");
+        setPrefix("qq邮箱:");
+        string email = popIpt();
+        pushOpt("请输入密码:\n");
+        setPrefix("密码:");
+        string password = popIpt();
+        pushOpt("======================\n");
+        pushOpt("1. 登录    2. 返回\n");
+        pushOpt("======================\n");
+        pushOpt("请选择:\n");
+        setPrefix("选择:");
+        if (popIpt() == "1") {
+            json req;
+            req["type"] = 2;
+            req["email"] = email;
+            req["password"] = password;
+            client.sendData(req.dump());
+            json rsp = popRsp();
+            if (rsp["code"] == 1) {
+                home(client, rsp);
+                return;
+            } else {
+                pushOpt("======================\n");
+                pushOpt(string(rsp["msg"]) + "\n");
+                pushOpt("1. 重新登录    2. 返回\n");
+                pushOpt("======================\n");
+                pushOpt("请选择:\n");
+                setPrefix("选择:");
+                if (popIpt() == "1") {
+                    continue;
+                } else {
+                    return;
+                }
+            }
+        } else {
+            return;
+        }
+    }
+}
+
+void codeSignIn(TcpClient& client) {
+    while (g_running) {
+        system("clear");
+        pushOpt("───── 验证码登录 ─────\n");
+        pushOpt("======================\n");
+        pushOpt("请输入qq邮箱:\n");
+        setPrefix("qq邮箱:");
+        string email = popIpt();
+        pushOpt("正在发送验证码...");
+        json req;
+        req["type"] = 3;
+        req["email"] = email;
+        client.sendData(req.dump());
+        json rsp = popRsp();
+        if (rsp["code"] != 1) {
+            pushOpt(string(rsp["msg"]) + "\n");
+            pushOpt("======================\n");
+            pushOpt("1. 重新输入    2. 返回\n");
+            pushOpt("======================\n");
+            pushOpt("请选择:\n");
+            setPrefix("选择:");
+            if (popIpt() != "1") {
+                return;
+            }
+            continue;
+        }
+        pushOpt("验证码已发送，请输入验证码:\n");
+        setPrefix("验证码:");
+        string code = popIpt();
+        pushOpt("======================\n");
+        pushOpt("1. 登录    2. 返回\n");
+        pushOpt("======================\n");
+        pushOpt("请选择:\n");
+        setPrefix("选择:");
+        if (popIpt() == "1") {
+            req["type"] = 4;
+            req["code"] = code;
+            client.sendData(req.dump());
+            rsp = popRsp();
+            if (rsp["code"] == 1) {
+                home(client, rsp);
+                return;
+            } else {
+                pushOpt("======================\n");
+                pushOpt(string(rsp["msg"]) + "\n");
+                pushOpt("1. 重新登录    2. 返回\n");
+                pushOpt("======================\n");
+                pushOpt("请选择:\n");
+                setPrefix("选择:");
+                if (popIpt() != "1") {
+                    return;
+                }
+            }
+        } else {
+            return;
+        }
+    }
+}
+
+void home(TcpClient& client, const json& user) {
+    while (g_running) {
+        system("clear");
+        pushOpt("────── " + string(user["name"]) + "，欢迎回来 ──────\n");
+        pushOpt("======================\n");
+        pushOpt("1. 好友\n");
+        pushOpt("2. 群聊\n");
+        pushOpt("3. 设置\n");
+        pushOpt("4. 退出登录\n");
+        pushOpt("======================\n");
+        pushOpt("请选择:\n");
+        setPrefix("选择:");
+        string input = popIpt();
+        if (!g_running || input.empty())
+            continue;
+        if (input == "1") {
+            pushOpt("── 好友 ──\n");
+        } else if (input == "2") {
+            pushOpt("── 群聊 ──\n");
+        } else if (input == "3") {
+            if (!settings(client, user)) {
+                return;
+            }
+            continue;
+        } else if (input == "4") {
+            return;
+        }
+    }
+}
+
+bool settings(TcpClient& client, const json& user) {
+    while (g_running) {
+        system("clear");
+        pushOpt("────── 设置 ──────\n");
+        pushOpt("======================\n");
+        pushOpt("1. 更改密码\n");
+        pushOpt("2. 注销账号\n");
+        pushOpt("3. 退出登录\n");
+        pushOpt("4. 返回\n");
+        pushOpt("======================\n");
+        pushOpt("请选择:\n");
+        setPrefix("选择:");
+        string input = popIpt();
+        if (!g_running || input.empty())
+            continue;
+        if (input == "1") {
+            system("clear");
+            pushOpt("────── 更改密码 ──────\n");
+            pushOpt("请输入新密码:\n");
+            setPrefix("新密码:");
+            string password = popIpt();
+            pushOpt("正在发送验证码...\n");
+            json req;
+            req["type"] = 3;
+            req["email"] = user["email"];
+            client.sendData(req.dump());
+            json rsp = popRsp();
+            if (rsp["code"] != 1) {
+                pushOpt(string(rsp["msg"]) + "\n");
+                continue;
+            }
+            pushOpt("验证码已发送，请输入验证码:\n");
+            setPrefix("验证码:");
+            string code = popIpt();
+            req["type"] = 5;
+            req["code"] = code;
+            req["password"] = password;
+            client.sendData(req.dump());
+            rsp = popRsp();
+            pushOpt(string(rsp["msg"]) + "\n");
+            continue;
+        } else if (input == "2") {
+            system("clear");
+            pushOpt("────── 注销账号 ──────\n");
+            pushOpt("确定要注销账号吗？此操作不可恢复！\n");
+            pushOpt("1. 确认注销    2. 返回\n");
+            pushOpt("请选择:\n");
+            setPrefix("选择:");
+            if (popIpt() == "1") {
+                client.sendData(R"({"type":6})");
+                json rsp = popRsp();
+                pushOpt(string(rsp["msg"]) + "\n");
+                return false;
+            }
+        } else if (input == "3") {
+            return false;
+        } else if (input == "4") {
+            return true;
+        }
+    }
+    return false;
 }
