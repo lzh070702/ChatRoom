@@ -30,11 +30,11 @@ queue<string> g_opt_que;
 int g_opt_efd;
 
 mutex g_ipt_mtx;
-queue<string> g_ipt_queu;
+queue<string> g_ipt_que;
 condition_variable g_ipt_cv;
 
 mutex g_rsp_mtx;
-queue<json> g_rsp_queu;
+queue<json> g_rsp_que;
 condition_variable g_rsp_cv;
 
 mutex g_ui_mutex;
@@ -59,6 +59,9 @@ void passwordSignIn(TcpClient& client);
 void codeSignIn(TcpClient& client);
 void home(TcpClient& client, const json& user);
 bool settings(TcpClient& client, const json& user);
+void changePassword(TcpClient& client, const json& user);
+bool signOut(TcpClient& client);
+bool exitLogin(TcpClient& client);
 
 int main(int argc, char* argv[]) {
     string host = (argc > 1) ? argv[1] : "127.0.0.1";
@@ -83,7 +86,6 @@ void netLoop(TcpClient* client, pool* pool) {
     ev.events = EPOLLIN;
     ev.data.fd = client->getFd();
     epoll_ctl(epfd, EPOLL_CTL_ADD, client->getFd(), &ev);
-
     auto last_send = chrono::steady_clock::now();
     auto last_recv = chrono::steady_clock::now();
     epoll_event events[4];
@@ -186,22 +188,22 @@ void parseOpt(const string& msg, chrono::steady_clock::time_point& last_recv) {
     int code = js["code"];
     if (code == 2) {
         string rsp;
-        if (type == 8) {
+        if (type == 9) {
             rsp = string(js["name"]) + string(js["msg"]);
         }
-        if (type == 12) {
+        if (type == 13) {
             rsp = "好友" + to_string(js["id"]) + "发来一条新消息";
         }
-        if (type == 16) {
+        if (type == 17) {
             rsp = string(js["msg"]) + string(js["group_name"]);
         }
-        if (type == 17) {
+        if (type == 18) {
             rsp = string(js["msg"]) + string(js["name"]);
         }
-        if (type == 18) {
+        if (type == 19) {
             rsp = string(js["msg"]);
         }
-        if (type == 24) {
+        if (type == 25) {
             rsp = "群聊" + to_string(js["group_id"]) + "发来一条新消息";
         }
         pushOpt(rsp + "\n");
@@ -251,36 +253,36 @@ vector<string> popOpt() {
 void pushIpt(const string& smsg) {
     {
         lock_guard<mutex> lk(g_ipt_mtx);
-        g_ipt_queu.push(smsg);
+        g_ipt_que.push(smsg);
     }
     g_ipt_cv.notify_one();
 }
 
 string popIpt() {
     unique_lock<mutex> lk(g_ipt_mtx);
-    g_ipt_cv.wait(lk, [] { return !g_ipt_queu.empty() || !g_running; });
-    if (!g_running || g_ipt_queu.empty())
+    g_ipt_cv.wait(lk, [] { return !g_ipt_que.empty() || !g_running; });
+    if (!g_running || g_ipt_que.empty())
         return "";
-    string s = g_ipt_queu.front();
-    g_ipt_queu.pop();
+    string s = g_ipt_que.front();
+    g_ipt_que.pop();
     return s;
 }
 
 void pushRsp(const json& js) {
     {
         lock_guard<mutex> lk(g_rsp_mtx);
-        g_rsp_queu.push(js);
+        g_rsp_que.push(js);
     }
     g_rsp_cv.notify_one();
 }
 
 json popRsp() {
     unique_lock<mutex> lk(g_rsp_mtx);
-    g_rsp_cv.wait(lk, [] { return !g_rsp_queu.empty() || !g_running; });
-    if (!g_running || g_rsp_queu.empty())
+    g_rsp_cv.wait(lk, [] { return !g_rsp_que.empty() || !g_running; });
+    if (!g_running || g_rsp_que.empty())
         return json();
-    json js = g_rsp_queu.front();
-    g_rsp_queu.pop();
+    json js = g_rsp_que.front();
+    g_rsp_que.pop();
     return js;
 }
 
@@ -302,9 +304,6 @@ void authOptions(TcpClient& client) {
         pushOpt("请选择:\n");
         setPrefix("选择:");
         string input = popIpt();
-        if (!g_running || input.empty())
-            continue;
-
         if (input == "1") {
             passwordSignIn(client);
             continue;
@@ -342,30 +341,47 @@ void signUp(TcpClient& client) {
         pushOpt("======================\n");
         pushOpt("请选择:\n");
         setPrefix("选择:");
-        if (popIpt() == "1") {
-            json req;
-            req["type"] = 1;
-            req["email"] = email;
-            req["name"] = name;
-            req["password"] = password;
-            client.sendData(req.dump());
-            json rsp = popRsp();
-            if (rsp["code"] == 1) {
-                pushOpt(string(rsp["msg"]) + "\n");
-                return;
-            } else {
-                pushOpt("======================\n");
-                pushOpt(string(rsp["msg"]) + "\n");
-                pushOpt("1. 重新注册    2. 返回\n");
-                pushOpt("======================\n");
-                pushOpt("请选择:\n");
-                setPrefix("选择:");
-                if (popIpt() != "1") {
+        bool ctn = false;
+        while (g_running) {
+            string input = popIpt();
+            if (input == "1") {
+                json req;
+                req["type"] = 1;
+                req["email"] = email;
+                req["name"] = name;
+                req["password"] = password;
+                client.sendData(req.dump());
+                json rsp = popRsp();
+                if (!g_running)
                     return;
+                if (rsp["code"] == 1) {
+                    pushOpt(string(rsp["msg"]) + "\n");
+                    return;
+                } else {
+                    pushOpt("======================\n");
+                    pushOpt(string(rsp["msg"]) + "\n");
+                    pushOpt("1. 重新注册    2. 返回\n");
+                    pushOpt("======================\n");
+                    pushOpt("请选择:\n");
+                    setPrefix("选择:");
+                    while (g_running) {
+                        string input = popIpt();
+                        if (input == "1") {
+                            ctn = true;
+                            break;
+                        } else if (input == "2") {
+                            return;
+                        }
+                        pushOpt("\033[A\033[K请选择:\n");
+                    }
                 }
+            } else if (input == "2") {
+                return;
             }
-        } else {
-            return;
+            if (ctn) {
+                break;
+            }
+            pushOpt("\033[A\033[K请选择:\n");
         }
     }
 }
@@ -386,31 +402,46 @@ void passwordSignIn(TcpClient& client) {
         pushOpt("======================\n");
         pushOpt("请选择:\n");
         setPrefix("选择:");
-        if (popIpt() == "1") {
-            json req;
-            req["type"] = 2;
-            req["email"] = email;
-            req["password"] = password;
-            client.sendData(req.dump());
-            json rsp = popRsp();
-            if (rsp["code"] == 1) {
-                home(client, rsp);
-                return;
-            } else {
-                pushOpt("======================\n");
-                pushOpt(string(rsp["msg"]) + "\n");
-                pushOpt("1. 重新登录    2. 返回\n");
-                pushOpt("======================\n");
-                pushOpt("请选择:\n");
-                setPrefix("选择:");
-                if (popIpt() == "1") {
-                    continue;
-                } else {
+        bool ctn = false;
+        while (g_running) {
+            string input = popIpt();
+            if (input == "1") {
+                json req;
+                req["type"] = 2;
+                req["email"] = email;
+                req["password"] = password;
+                client.sendData(req.dump());
+                json rsp = popRsp();
+                if (!g_running)
                     return;
+                if (rsp["code"] == 1) {
+                    home(client, rsp);
+                    return;
+                } else {
+                    pushOpt("======================\n");
+                    pushOpt(string(rsp["msg"]) + "\n");
+                    pushOpt("1. 重新登录    2. 返回\n");
+                    pushOpt("======================\n");
+                    pushOpt("请选择:\n");
+                    setPrefix("选择:");
+                    while (g_running) {
+                        string input = popIpt();
+                        if (input == "1") {
+                            ctn = true;
+                            break;
+                        } else if (input == "2") {
+                            return;
+                        }
+                        pushOpt("\033[A\033[K请选择:\n");
+                    }
                 }
+            } else if (input == "2") {
+                return;
             }
-        } else {
-            return;
+            if (ctn) {
+                break;
+            }
+            pushOpt("\033[A\033[K请选择:\n");
         }
     }
 }
@@ -429,15 +460,23 @@ void codeSignIn(TcpClient& client) {
         req["email"] = email;
         client.sendData(req.dump());
         json rsp = popRsp();
+        if (!g_running)
+            return;
         if (rsp["code"] != 1) {
-            pushOpt(string(rsp["msg"]) + "\n");
             pushOpt("======================\n");
+            pushOpt(string(rsp["msg"]) + "\n");
             pushOpt("1. 重新输入    2. 返回\n");
             pushOpt("======================\n");
             pushOpt("请选择:\n");
             setPrefix("选择:");
-            if (popIpt() != "1") {
-                return;
+            while (g_running) {
+                string input = popIpt();
+                if (input == "1") {
+                    break;
+                } else if (input == "2") {
+                    return;
+                }
+                pushOpt("\033[A\033[K请选择:\n");
             }
             continue;
         }
@@ -449,27 +488,44 @@ void codeSignIn(TcpClient& client) {
         pushOpt("======================\n");
         pushOpt("请选择:\n");
         setPrefix("选择:");
-        if (popIpt() == "1") {
-            req["type"] = 4;
-            req["code"] = code;
-            client.sendData(req.dump());
-            rsp = popRsp();
-            if (rsp["code"] == 1) {
-                home(client, rsp);
-                return;
-            } else {
-                pushOpt("======================\n");
-                pushOpt(string(rsp["msg"]) + "\n");
-                pushOpt("1. 重新登录    2. 返回\n");
-                pushOpt("======================\n");
-                pushOpt("请选择:\n");
-                setPrefix("选择:");
-                if (popIpt() != "1") {
+        bool ctn = false;
+        while (g_running) {
+            string input = popIpt();
+            if (input == "1") {
+                req["type"] = 4;
+                req["code"] = code;
+                client.sendData(req.dump());
+                rsp = popRsp();
+                if (!g_running)
                     return;
+                if (rsp["code"] == 1) {
+                    home(client, rsp);
+                    return;
+                } else {
+                    pushOpt("======================\n");
+                    pushOpt(string(rsp["msg"]) + "\n");
+                    pushOpt("1. 重新登录    2. 返回\n");
+                    pushOpt("======================\n");
+                    pushOpt("请选择:\n");
+                    setPrefix("选择:");
+                    while (g_running) {
+                        string input = popIpt();
+                        if (input == "1") {
+                            ctn = true;
+                            break;
+                        } else if (input == "2") {
+                            return;
+                        }
+                        pushOpt("\033[A\033[K请选择:\n");
+                    }
                 }
+            } else if (input == "2") {
+                return;
             }
-        } else {
-            return;
+            if (ctn) {
+                break;
+            }
+            pushOpt("\033[A\033[K请选择:\n");
         }
     }
 }
@@ -477,12 +533,11 @@ void codeSignIn(TcpClient& client) {
 void home(TcpClient& client, const json& user) {
     while (g_running) {
         system("clear");
-        pushOpt("────── " + string(user["name"]) + "，欢迎回来 ──────\n");
+        pushOpt("──────── 首页 ────────\n");
         pushOpt("======================\n");
         pushOpt("1. 好友\n");
         pushOpt("2. 群聊\n");
         pushOpt("3. 设置\n");
-        pushOpt("4. 退出登录\n");
         pushOpt("======================\n");
         pushOpt("请选择:\n");
         setPrefix("选择:");
@@ -497,9 +552,6 @@ void home(TcpClient& client, const json& user) {
             if (!settings(client, user)) {
                 return;
             }
-            continue;
-        } else if (input == "4") {
-            return;
         }
     }
 }
@@ -507,7 +559,7 @@ void home(TcpClient& client, const json& user) {
 bool settings(TcpClient& client, const json& user) {
     while (g_running) {
         system("clear");
-        pushOpt("────── 设置 ──────\n");
+        pushOpt("──────── 设置 ────────\n");
         pushOpt("======================\n");
         pushOpt("1. 更改密码\n");
         pushOpt("2. 注销账号\n");
@@ -517,52 +569,148 @@ bool settings(TcpClient& client, const json& user) {
         pushOpt("请选择:\n");
         setPrefix("选择:");
         string input = popIpt();
-        if (!g_running || input.empty())
-            continue;
         if (input == "1") {
-            system("clear");
-            pushOpt("────── 更改密码 ──────\n");
-            pushOpt("请输入新密码:\n");
-            setPrefix("新密码:");
-            string password = popIpt();
-            pushOpt("正在发送验证码...\n");
-            json req;
-            req["type"] = 3;
-            req["email"] = user["email"];
-            client.sendData(req.dump());
-            json rsp = popRsp();
-            if (rsp["code"] != 1) {
-                pushOpt(string(rsp["msg"]) + "\n");
-                continue;
-            }
-            pushOpt("验证码已发送，请输入验证码:\n");
-            setPrefix("验证码:");
-            string code = popIpt();
-            req["type"] = 5;
-            req["code"] = code;
-            req["password"] = password;
-            client.sendData(req.dump());
-            rsp = popRsp();
-            pushOpt(string(rsp["msg"]) + "\n");
+            changePassword(client, user);
             continue;
         } else if (input == "2") {
-            system("clear");
-            pushOpt("────── 注销账号 ──────\n");
-            pushOpt("确定要注销账号吗？此操作不可恢复！\n");
-            pushOpt("1. 确认注销    2. 返回\n");
-            pushOpt("请选择:\n");
-            setPrefix("选择:");
-            if (popIpt() == "1") {
-                client.sendData(R"({"type":6})");
-                json rsp = popRsp();
-                pushOpt(string(rsp["msg"]) + "\n");
+            if (signOut(client)) {
                 return false;
             }
+            continue;
         } else if (input == "3") {
-            return false;
+            if (exitLogin(client)) {
+                return false;
+            }
         } else if (input == "4") {
             return true;
         }
     }
     return false;
+}
+
+void changePassword(TcpClient& client, const json& user) {  //
+    system("clear");
+    pushOpt("────── 更改密码 ──────\n");
+    pushOpt("======================\n");
+    pushOpt("请输入新密码:\n");
+    setPrefix("新密码:");
+    string password = popIpt();
+    json req;
+    req["type"] = 3;
+    req["email"] = user["email"];
+    while (g_running) {
+        pushOpt("正在发送验证码...");
+        client.sendData(req.dump());
+        json rsp = popRsp();
+        if (!g_running)
+            return;
+        if (rsp["code"] != 1) {
+            pushOpt("======================\n");
+            pushOpt(string(rsp["msg"]) + "\n");
+            pushOpt("是否重新发送？\n");
+            pushOpt("1. 确认    2. 返回\n");
+            pushOpt("======================\n");
+            pushOpt("请选择\n");
+            setPrefix("选择:");
+            while (g_running) {
+                string input = popIpt();
+                if (input == "1") {
+                    pushOpt("\033[A\033[K\033[A\033[K\033[A\033[K");
+                    pushOpt("\033[A\033[K\033[A\033[K\033[A\033[K");
+                    break;
+                } else if (input == "2") {
+                    return;
+                }
+                pushOpt("\033[A\033[K请选择:\n");
+            }
+        } else {
+            break;
+        }
+    }
+    while (g_running) {
+        pushOpt("验证码已发送，请输入验证码:\n");
+        setPrefix("验证码:");
+        string code = popIpt();
+        req["type"] = 5;
+        req["code"] = code;
+        req["password"] = password;
+        client.sendData(req.dump());
+        json rsp = popRsp();
+        if (!g_running)
+            return;
+        if (rsp["code"] != 1) {
+            pushOpt("======================\n");
+            pushOpt(string(rsp["msg"]) + "\n");
+            pushOpt("是否重新输入？\n");
+            pushOpt("1. 确认    2. 返回\n");
+            pushOpt("======================\n");
+            pushOpt("请选择:\n");
+            setPrefix("选择:");
+            while (g_running) {
+                string input = popIpt();
+                if (input == "1") {
+                    pushOpt("\033[A\033[K\033[A\033[K\033[A\033[K");
+                    pushOpt("\033[A\033[K\033[A\033[K\033[A\033[K\033[A\033[K");
+                    break;
+                } else if (input == "2") {
+                    return;
+                }
+                pushOpt("\033[A\033[K请选择:\n");
+            }
+        } else {
+            break;
+        }
+    }
+}
+
+bool signOut(TcpClient& client) {
+    system("clear");
+    pushOpt("────── 注销账号 ──────\n");
+    pushOpt("======================\n");
+    pushOpt("确定要注销账号吗？此操作不可恢复！\n");
+    pushOpt("1. 确认    2. 返回\n");
+    pushOpt("======================\n");
+    pushOpt("请选择:\n");
+    setPrefix("选择:");
+    while (g_running) {
+        string input = popIpt();
+        if (input == "1") {
+            break;
+        } else if (input == "2") {
+            return false;
+        }
+        pushOpt("\033[A\033[K请选择:\n");
+    }
+    client.sendData(R"({"type":7})");
+    json rsp = popRsp();
+    if (!g_running)
+        return false;
+    pushOpt(string(rsp["msg"]) + "\n");
+    return true;
+}
+
+bool exitLogin(TcpClient& client) {
+    system("clear");
+    pushOpt("────── 退出登录 ──────\n");
+    pushOpt("======================\n");
+    pushOpt("确定要退出登录吗？\n");
+    pushOpt("1. 确认    2. 返回\n");
+    pushOpt("======================\n");
+    pushOpt("请选择:\n");
+    setPrefix("选择:");
+    while (g_running) {
+        string input = popIpt();
+        if (input == "1") {
+            break;
+        } else if (input == "2") {
+            return false;
+        }
+        pushOpt("\033[A\033[K请选择:\n");
+    }
+    client.sendData(R"({"type":6})");
+    json rsp = popRsp();
+    if (!g_running)
+        return false;
+    pushOpt(string(rsp["msg"]) + "\n");
+    return true;
 }

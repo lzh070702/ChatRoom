@@ -78,7 +78,7 @@ std::vector<User> FriendModel::queryFriends(int user_id) {
     char sql[1024] = {0};
     snprintf(sql, sizeof(sql),
              "SELECT friend_id FROM friend "
-             "WHERE user_id = %d AND status > 1;",
+             "WHERE user_id = %d;",
              user_id);
     std::vector<User> friends;
     if (!m_mysql.query(sql)) {

@@ -52,18 +52,19 @@ std::vector<json> GroupModel::queryGroups(int user_id) {
     return groups;
 }
 
-std::vector<int> GroupModel::queryMembers(int group_id) {
+std::vector<std::pair<int, int>> GroupModel::queryMembers(int group_id) {
     char sql[1024] = {0};
     snprintf(sql, sizeof(sql),
-             "SELECT user_id FROM group_user "
-             "WHERE group_id = %d AND role > 0;",
+             "SELECT user_id, role FROM group_user "
+             "WHERE group_id = %d;",
              group_id);
-    std::vector<int> members;
+    std::vector<std::pair<int, int>> members;
     if (!m_mysql.query(sql)) {
         return members;
     }
     while (m_mysql.next()) {
-        members.emplace_back(std::stoi(m_mysql.value(0)));
+        members.emplace_back(std::stoi(m_mysql.value(0)),
+                             std::stoi(m_mysql.value(1)));
     }
     return members;
 }
@@ -75,6 +76,17 @@ bool GroupModel::groupExist(int group_id) {
              "WHERE id = %d;",
              group_id);
     return m_mysql.query(sql) && m_mysql.next();
+}
+
+std::string GroupModel::getGroupName(int group_id) {
+    char sql[1024] = {0};
+    snprintf(sql, sizeof(sql),
+             "SELECT name FROM group_info WHERE id = %d;",
+             group_id);
+    if (!m_mysql.query(sql) || !m_mysql.next()) {
+        return "";
+    }
+    return m_mysql.value(0);
 }
 
 bool GroupModel::isInGroup(int group_id, int user_id) {

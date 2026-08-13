@@ -18,17 +18,18 @@ int MessageModel::insert(int sender_id,
     return m_mysql.updateAndGetId(sql);
 }
 
-std::vector<json> MessageModel::queryHistory(int user_id, int friend_id) {
+std::vector<json> MessageModel::queryHistory(int user_id, int friend_id, int scope) {
     char sql[1024] = {0};
+    const char* limit = (scope == 0) ? "LIMIT 20" : "";
     snprintf(sql, sizeof(sql),
              "SELECT sender_id, content, send_time, is_file FROM ("
              "SELECT sender_id, content, send_time, is_file FROM message "
              "WHERE type = 0 "
              "AND ((sender_id = %d AND receiver_id = %d) "
              "OR (sender_id = %d AND receiver_id = %d)) "
-             "ORDER BY send_time DESC LIMIT 100"
+             "ORDER BY send_time DESC %s"
              ") AS t ORDER BY send_time ASC;",
-             user_id, friend_id, friend_id, user_id);
+             user_id, friend_id, friend_id, user_id, limit);
     std::vector<json> history;
     if (!m_mysql.query(sql)) {
         return history;
@@ -44,15 +45,16 @@ std::vector<json> MessageModel::queryHistory(int user_id, int friend_id) {
     return history;
 }
 
-std::vector<json> MessageModel::queryGroupHistory(int group_id) {
+std::vector<json> MessageModel::queryGroupHistory(int group_id, int scope) {
     char sql[1024] = {0};
+    const char* limit = (scope == 0) ? "LIMIT 20" : "";
     snprintf(sql, sizeof(sql),
              "SELECT sender_id, content, send_time, is_file FROM ("
              "SELECT sender_id, content, send_time, is_file FROM message "
              "WHERE type = 1 AND receiver_id = %d "
-             "ORDER BY send_time DESC LIMIT 100"
+             "ORDER BY send_time DESC %s"
              ") AS t ORDER BY send_time ASC;",
-             group_id);
+             group_id, limit);
     std::vector<json> history;
     if (!m_mysql.query(sql)) {
         return history;

@@ -18,8 +18,8 @@ class MessageModel {
                int type,
                const std::string& msg,
                bool is_file);
-    std::vector<json> queryHistory(int user_id, int friend_id);
-    std::vector<json> queryGroupHistory(int group_id);
+    std::vector<json> queryHistory(int user_id, int friend_id, int scope = 0);
+    std::vector<json> queryGroupHistory(int group_id, int scope = 0);
     bool removeAll(int user_id);
 
    private:

@@ -30,13 +30,14 @@ class ChatService {
 
    private:
     ChatService();
-    
+
     void heartbeat(std::shared_ptr<Connection> conn, const json& js);
     void signUp(std::shared_ptr<Connection> conn, const json& js);
     void signIn(std::shared_ptr<Connection> conn, const json& js);
     void sendCode(std::shared_ptr<Connection> conn, const json& js);
     void codeLogin(std::shared_ptr<Connection> conn, const json& js);
     void changePassword(std::shared_ptr<Connection> conn, const json& js);
+    void exitLogin(std::shared_ptr<Connection> conn, const json& js);
     void signOut(std::shared_ptr<Connection> conn, const json& js);
     void queryFriends(std::shared_ptr<Connection> conn, const json& js);
     void sendRequest(std::shared_ptr<Connection> conn, const json& js);
