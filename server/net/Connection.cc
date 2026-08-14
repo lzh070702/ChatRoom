@@ -52,17 +52,23 @@ bool Connection::sendData(const std::string& data) {
     if (m_fd == -1) {
         return false;
     }
-    size_t totalSent = 0;
-    while (totalSent < data.size()) {
-        ssize_t n =
-            write(m_fd, data.data() + totalSent, data.size() - totalSent);
+    m_write_buf.append(data);
+    if (!flush()) {
+        m_reactor->enableOut(m_fd);
+    }
+    return true;
+}
+
+bool Connection::flush() {
+    while (!m_write_buf.empty()) {
+        ssize_t n = write(m_fd, m_write_buf.data(), m_write_buf.size());
         if (n > 0) {
-            totalSent += static_cast<size_t>(n);
+            m_write_buf.erase(0, static_cast<size_t>(n));
         } else if (n == 0) {
             return false;
         } else {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                break;
+                return false;
             } else if (errno == EINTR) {
                 continue;
             } else {
@@ -70,7 +76,7 @@ bool Connection::sendData(const std::string& data) {
             }
         }
     }
-    return totalSent == data.size();
+    return true;
 }
 
 void Connection::closeFd() {

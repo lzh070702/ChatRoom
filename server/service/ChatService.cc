@@ -448,7 +448,9 @@ void ChatService::sendRequest(std::shared_ptr<Connection> conn,
         }
     }
     if (friend_conn) {
-        friend_conn->getReactor()->handleWrite(friend_conn, response.dump());
+        friend_conn->getReactor()->post([friend_conn, data = response.dump()] {
+            friend_conn->sendData(data + '\n');
+        });
         conn->getReactor()->handleWrite(
             conn, R"({"type":9,"code":1,"msg":"成功发送申请"})");
         return;
@@ -570,7 +572,9 @@ void ChatService::oneChat(std::shared_ptr<Connection> conn, const json& js) {
         }
     }
     if (friend_conn) {
-        friend_conn->getReactor()->handleWrite(friend_conn, response.dump());
+        friend_conn->getReactor()->post([friend_conn, data = response.dump()] {
+            friend_conn->sendData(data + '\n');
+        });
         return;
     }
     if (!m_redis.lpush("offline_msg:" + std::to_string(friend_id),
@@ -663,7 +667,9 @@ void ChatService::inviteToGroup(std::shared_ptr<Connection> conn,
         }
     }
     if (friend_conn) {
-        friend_conn->getReactor()->handleWrite(friend_conn, notify.dump());
+        friend_conn->getReactor()->post([friend_conn, data = notify.dump()] {
+            friend_conn->sendData(data + '\n');
+        });
     } else {
         m_redis.lpush("offline_msg:" + std::to_string(friend_id),
                       notify.dump());
@@ -711,7 +717,9 @@ void ChatService::applyGroups(std::shared_ptr<Connection> conn,
             }
         }
         if (user_conn) {
-            user_conn->getReactor()->handleWrite(user_conn, response.dump());
+            user_conn->getReactor()->post([user_conn, data = response.dump()] {
+                user_conn->sendData(data + '\n');
+            });
         } else {
             if (!m_redis.lpush("offline_group_request:" + std::to_string(user),
                                response.dump())) {
@@ -763,7 +771,9 @@ void ChatService::processGroupRequest(std::shared_ptr<Connection> conn,
         }
     }
     if (user_conn) {
-        user_conn->getReactor()->handleWrite(user_conn, notify.dump());
+        user_conn->getReactor()->post([user_conn, data = notify.dump()] {
+            user_conn->sendData(data + '\n');
+        });
     } else {
         m_redis.lpush("offline_msg:" + std::to_string(applicant_id),
                       notify.dump());
@@ -956,8 +966,10 @@ void ChatService::groupChat(std::shared_ptr<Connection> conn, const json& js) {
             }
         }
         if (member_conn) {
-            member_conn->getReactor()->handleWrite(member_conn,
-                                                   response.dump());
+            member_conn->getReactor()->post(
+                [member_conn, data = response.dump()] {
+                    member_conn->sendData(data + '\n');
+                });
         } else {
             m_redis.lpush("offline_group_msg:" + std::to_string(member_id),
                           response.dump());

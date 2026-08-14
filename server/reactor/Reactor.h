@@ -2,6 +2,7 @@
 
 #include <sys/epoll.h>
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -21,6 +22,9 @@ class Reactor {
     int getWakeupFd() const;
     int getConnCnt() const;
     void handleWrite(std::shared_ptr<Connection> conn, const std::string& data);
+    void enableOut(int fd);
+    void disableOut(int fd);
+    void post(std::function<void()> task);
 
    private:
     void handleWakeup();
@@ -34,6 +38,7 @@ class Reactor {
     std::atomic<int> m_conn_cnt{0};
     std::mutex m_mtx;
     std::vector<int> m_cds;
+    std::vector<std::function<void()>> m_tasks;
     std::unordered_map<int, std::shared_ptr<Connection>> m_conns;
 
     static constexpr int MAX_EVENTS = 1024;

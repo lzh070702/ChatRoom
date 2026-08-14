@@ -16,6 +16,7 @@ class Connection {
     bool recvData();
     bool getMessage(std::string& msg);
     bool sendData(const std::string& data);
+    bool flush();
     void closeFd();
     bool isClosed() const;
     void setUserId(int id);
@@ -29,6 +30,7 @@ class Connection {
     int m_user_id{-1};
     Reactor* m_reactor;
     std::string m_read_buf;
+    std::string m_write_buf;
     std::chrono::steady_clock::time_point m_last_active{
         std::chrono::steady_clock::now()};
 };

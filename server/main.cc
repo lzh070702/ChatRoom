@@ -1,3 +1,4 @@
+#include <csignal>
 #include <glog/logging.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -15,6 +16,7 @@ const int SUB_CNT = 4;
 int main(int argc, char* argv[]) {
     google::InitGoogleLogging(argv[0]);
     FLAGS_logtostderr = true;
+    signal(SIGPIPE, SIG_IGN);
     mkdir("./files", 0755);
     pool thread_pool(SUB_CNT);
     vector<unique_ptr<Reactor>> subs(SUB_CNT);

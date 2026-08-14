@@ -32,18 +32,25 @@ void Reactor ::loop() {
         for (int i = 0; i < n; i++) {
             if (events[i].data.ptr == &m_wakeup_fd) {
                 handleWakeup();
-            } else {
-                Connection* raw = static_cast<Connection*>(events[i].data.ptr);
-                int fd = raw->getFd();
-                auto it = m_conns.find(fd);
-                if (it == m_conns.end()) {
-                    continue;
-                }
-                auto conn = it->second;
-                if (events[i].events & (EPOLLRDHUP | EPOLLERR | EPOLLHUP)) {
-                    handleClose(conn);
-                } else if (events[i].events & EPOLLIN) {
-                    handleRead(conn);
+                continue;
+            }
+            Connection* raw = static_cast<Connection*>(events[i].data.ptr);
+            int fd = raw->getFd();
+            auto it = m_conns.find(fd);
+            if (it == m_conns.end()) {
+                continue;
+            }
+            auto conn = it->second;
+            if (events[i].events & (EPOLLRDHUP | EPOLLERR | EPOLLHUP)) {
+                handleClose(conn);
+                continue;
+            }
+            if (events[i].events & EPOLLIN) {
+                handleRead(conn);
+            }
+            if ((events[i].events & EPOLLOUT) && m_conns.count(fd)) {
+                if (conn->flush()) {
+                    disableOut(fd);
                 }
             }
         }
@@ -54,6 +61,15 @@ void Reactor ::pushFd(int fd) {
     {
         std::lock_guard<std::mutex> lock(m_mtx);
         m_cds.push_back(fd);
+    }
+    uint64_t u = 1;
+    write(m_wakeup_fd, &u, sizeof(u));
+}
+
+void Reactor ::post(std::function<void()> task) {
+    {
+        std::lock_guard<std::mutex> lock(m_mtx);
+        m_tasks.push_back(std::move(task));
     }
     uint64_t u = 1;
     write(m_wakeup_fd, &u, sizeof(u));
@@ -71,12 +87,14 @@ void Reactor ::handleWakeup() {
     uint64_t tmp;
     while (read(m_wakeup_fd, &tmp, sizeof(tmp)) > 0)
         ;
-    epoll_event ev{};
     std::vector<int> cfds;
+    std::vector<std::function<void()>> tasks;
     {
         std::lock_guard<std::mutex> lock(m_mtx);
         cfds.swap(m_cds);
+        tasks.swap(m_tasks);
     }
+    epoll_event ev{};
     for (const auto& fd : cfds) {
         fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
         ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
@@ -87,6 +105,9 @@ void Reactor ::handleWakeup() {
             m_conn_cnt++;
             LOG(INFO) << "New connection fd=" << fd;
         }
+    }
+    for (auto& task : tasks) {
+        task();
     }
 }
 
@@ -126,12 +147,29 @@ void Reactor ::handleWrite(std::shared_ptr<Connection> conn,
     if (data.empty()) {
         return;
     }
-    if (!conn->sendData(data + '\n')) {
-        LOG(ERROR) << "Write failed fd=" << conn->getFd()
-                   << " uid=" << conn->getUserId();
-        handleClose(conn);
+    conn->sendData(data + '\n');
+}
+
+void Reactor ::enableOut(int fd) {
+    auto it = m_conns.find(fd);
+    if (it == m_conns.end()) {
         return;
     }
+    epoll_event ev{};
+    ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP | EPOLLOUT;
+    ev.data.ptr = it->second.get();
+    epoll_ctl(m_epfd, EPOLL_CTL_MOD, fd, &ev);
+}
+
+void Reactor ::disableOut(int fd) {
+    auto it = m_conns.find(fd);
+    if (it == m_conns.end()) {
+        return;
+    }
+    epoll_event ev{};
+    ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
+    ev.data.ptr = it->second.get();
+    epoll_ctl(m_epfd, EPOLL_CTL_MOD, fd, &ev);
 }
 
 void Reactor ::handleHeartbeat() {
