@@ -81,11 +81,12 @@ std::vector<User> FriendModel::queryFriends(int user_id) {
              "WHERE user_id = %d;",
              user_id);
     std::vector<User> friends;
-    if (!m_mysql.query(sql)) {
+    std::vector<std::vector<std::string>> rows;
+    if (!m_mysql.queryAll(sql, rows)) {
         return friends;
     }
-    while (m_mysql.next()) {
-        int friend_id = std::stoi(m_mysql.value(0));
+    for (auto& row : rows) {
+        int friend_id = std::stoi(row[0]);
         User user;
         if (m_user_model.queryById(friend_id, user)) {
             friends.emplace_back(user);
@@ -100,8 +101,9 @@ int FriendModel::isFriend(int user_id, int friend_id) {
              "SELECT status FROM friend "
              "WHERE user_id = %d AND friend_id = %d;",
              user_id, friend_id);
-    if (m_mysql.query(sql) && m_mysql.next()) {
-        return std::stoi(m_mysql.value(0));
+    std::vector<std::vector<std::string>> rows;
+    if (m_mysql.queryAll(sql, rows) && !rows.empty()) {
+        return std::stoi(rows[0][0]);
     }
     return -1;
 }

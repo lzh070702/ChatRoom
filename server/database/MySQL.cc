@@ -2,10 +2,6 @@
 
 #include "MySQL.h"
 
-MySQL::~MySQL() {
-    freeResult();
-}
-
 void MySQL::setPool(MySQLPool* pool) {
     m_pool = pool;
 }
@@ -33,37 +29,37 @@ int MySQL::updateAndGetId(const std::string& sql) {
     return id;
 }
 
-bool MySQL::query(const std::string& sql) {
-    freeResult();
+bool MySQL::queryAll(const std::string& sql,
+                     std::vector<std::vector<std::string>>& rows) {
+    rows.clear();
     MYSQL* conn = m_pool->borrow();
     if (mysql_query(conn, sql.c_str())) {
         LOG(ERROR) << "MySQL query failed: " << mysql_error(conn);
         m_pool->returnConn(conn);
         return false;
     }
-    m_result = mysql_store_result(conn);
+    MYSQL_RES* result = mysql_store_result(conn);
     m_pool->returnConn(conn);
-    return true;
-}
-
-bool MySQL::next() {
-    if (m_result != nullptr) {
-        m_row = mysql_fetch_row(m_result);
-        if (m_row != nullptr) {
-            return true;
+    if (result == nullptr) {
+        return true;
+    }
+    int field_count = mysql_num_fields(result);
+    MYSQL_ROW row;
+    while ((row = mysql_fetch_row(result)) != nullptr) {
+        unsigned long* lengths = mysql_fetch_lengths(result);
+        std::vector<std::string> cols;
+        cols.reserve(field_count);
+        for (int i = 0; i < field_count; ++i) {
+            if (row[i] == nullptr) {
+                cols.emplace_back();
+            } else {
+                cols.emplace_back(row[i], static_cast<size_t>(lengths[i]));
+            }
         }
+        rows.emplace_back(std::move(cols));
     }
-    return false;
-}
-
-std::string MySQL::value(int index) {
-    int fieldCount = mysql_num_fields(m_result);
-    if (index >= fieldCount || index < 0) {
-        return std::string();
-    }
-    char* val = m_row[index];
-    unsigned long length = mysql_fetch_lengths(m_result)[index];
-    return std::string(val, length);
+    mysql_free_result(result);
+    return true;
 }
 
 MYSQL* MySQL::transaction() {
@@ -85,12 +81,4 @@ bool MySQL::rollback(MYSQL* conn) {
     bool res = mysql_rollback(conn);
     m_pool->returnConn(conn);
     return res == 0;
-}
-
-void MySQL::freeResult() {
-    if (m_result != nullptr) {
-        mysql_free_result(m_result);
-        m_result = nullptr;
-        m_row = nullptr;
-    }
 }

@@ -31,15 +31,16 @@ std::vector<json> MessageModel::queryHistory(int user_id, int friend_id, int sco
              ") AS t ORDER BY send_time ASC;",
              user_id, friend_id, friend_id, user_id, limit);
     std::vector<json> history;
-    if (!m_mysql.query(sql)) {
+    std::vector<std::vector<std::string>> rows;
+    if (!m_mysql.queryAll(sql, rows)) {
         return history;
     }
-    while (m_mysql.next()) {
+    for (auto& row : rows) {
         json js;
-        js["sender_id"] = std::stoi(m_mysql.value(0));
-        js["content"] = m_mysql.value(1);
-        js["time"] = m_mysql.value(2);
-        js["is_file"] = std::stoi(m_mysql.value(3));
+        js["sender_id"] = std::stoi(row[0]);
+        js["content"] = row[1];
+        js["time"] = row[2];
+        js["is_file"] = std::stoi(row[3]);
         history.emplace_back(js);
     }
     return history;
@@ -56,15 +57,16 @@ std::vector<json> MessageModel::queryGroupHistory(int group_id, int scope) {
              ") AS t ORDER BY send_time ASC;",
              group_id, limit);
     std::vector<json> history;
-    if (!m_mysql.query(sql)) {
+    std::vector<std::vector<std::string>> rows;
+    if (!m_mysql.queryAll(sql, rows)) {
         return history;
     }
-    while (m_mysql.next()) {
+    for (auto& row : rows) {
         json js;
-        js["sender_id"] = std::stoi(m_mysql.value(0));
-        js["content"] = m_mysql.value(1);
-        js["time"] = m_mysql.value(2);
-        js["is_file"] = std::stoi(m_mysql.value(3));
+        js["sender_id"] = std::stoi(row[0]);
+        js["content"] = row[1];
+        js["time"] = row[2];
+        js["is_file"] = std::stoi(row[3]);
         history.emplace_back(js);
     }
     return history;

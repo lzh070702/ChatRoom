@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <string>
+#include <vector>
 
 #include "UserModel.h"
 
@@ -23,15 +24,17 @@ bool UserModel::queryById(int id, User& user) {
              "SELECT id, name, email, password, state FROM user "
              "WHERE id = %d;",
              id);
-    if (m_mysql.query(sql) && m_mysql.next()) {
-        user.setId(std::stoi(m_mysql.value(0)));
-        user.setName(m_mysql.value(1));
-        user.setEmail(m_mysql.value(2));
-        user.setPassword(m_mysql.value(3));
-        user.setState(std::stoi(m_mysql.value(4)));
-        return true;
+    std::vector<std::vector<std::string>> rows;
+    if (!m_mysql.queryAll(sql, rows) || rows.empty()) {
+        return false;
     }
-    return false;
+    auto& row = rows[0];
+    user.setId(std::stoi(row[0]));
+    user.setName(row[1]);
+    user.setEmail(row[2]);
+    user.setPassword(row[3]);
+    user.setState(std::stoi(row[4]));
+    return true;
 }
 
 bool UserModel::queryByEmail(const std::string& email, User& user) {
@@ -40,15 +43,17 @@ bool UserModel::queryByEmail(const std::string& email, User& user) {
              "SELECT id, name, email, password, state FROM user "
              "WHERE email = '%s';",
              email.c_str());
-    if (m_mysql.query(sql) && m_mysql.next()) {
-        user.setId(std::stoi(m_mysql.value(0)));
-        user.setName(m_mysql.value(1));
-        user.setEmail(m_mysql.value(2));
-        user.setPassword(m_mysql.value(3));
-        user.setState(std::stoi(m_mysql.value(4)));
-        return true;
+    std::vector<std::vector<std::string>> rows;
+    if (!m_mysql.queryAll(sql, rows) || rows.empty()) {
+        return false;
     }
-    return false;
+    auto& row = rows[0];
+    user.setId(std::stoi(row[0]));
+    user.setName(row[1]);
+    user.setEmail(row[2]);
+    user.setPassword(row[3]);
+    user.setState(std::stoi(row[4]));
+    return true;
 }
 
 bool UserModel::updateState(int id, int state) {
