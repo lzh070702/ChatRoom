@@ -1,4 +1,5 @@
 #include <readline/readline.h>
+#include <signal.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <unistd.h>
@@ -39,8 +40,13 @@ condition_variable g_rsp_cv;
 
 mutex g_ui_mutex;
 string g_prefix;
+json g_user;
 
-void netLoop(TcpClient* client, pool* pool);
+mutex g_chat_mtx;
+int g_chat_type = -1;  // -1 无会话, 0 私聊, 1 群聊
+int g_chat_id = -1;    // 私聊为对方好友 id, 群聊为群 id
+
+void netLoop(TcpClient* client);
 void ioLoop();
 void on_line(char* line);
 void parseOpt(const string& msg, chrono::steady_clock::time_point& last_recv);
@@ -52,18 +58,28 @@ string popIpt();
 void pushRsp(const json& js);
 json popRsp();
 void setPrefix(const string& prefix);
+void showTip(const string& msg);
+bool confirm(const string& msg);
+void setChatSession(int type, int id);
+bool isCurrentSession(int type, int id);
 
 void authOptions(TcpClient& client);
 void signUp(TcpClient& client);
 void passwordSignIn(TcpClient& client);
 void codeSignIn(TcpClient& client);
-void home(TcpClient& client, const json& user);
-bool settings(TcpClient& client, const json& user);
-void changePassword(TcpClient& client, const json& user);
+void home(TcpClient& client);
+void friendPage(TcpClient& client);
+void addFriend(TcpClient& client);
+void friendList(TcpClient& client);
+void friendMenu(TcpClient& client, const json& f);
+void chat(TcpClient& client, const json& f);
+bool settings(TcpClient& client);
+void changePassword(TcpClient& client);
 bool signOut(TcpClient& client);
 bool exitLogin(TcpClient& client);
 
 int main(int argc, char* argv[]) {
+    signal(SIGPIPE, SIG_IGN);
     string host = (argc > 1) ? argv[1] : "127.0.0.1";
     int port = (argc > 2) ? stoi(argv[2]) : 8000;
     TcpClient client;
@@ -74,13 +90,13 @@ int main(int argc, char* argv[]) {
     g_opt_efd = eventfd(0, EFD_NONBLOCK);
 
     pool pool(4);
-    pool.enqueue(netLoop, &client, &pool);
+    pool.enqueue(netLoop, &client);
     pool.enqueue(ioLoop);
     authOptions(client);
     return 0;
 }
 
-void netLoop(TcpClient* client, pool* pool) {
+void netLoop(TcpClient* client) {
     int epfd = epoll_create1(0);
     epoll_event ev{};
     ev.events = EPOLLIN;
@@ -103,6 +119,7 @@ void netLoop(TcpClient* client, pool* pool) {
             g_rsp_cv.notify_all();
             break;
         }
+        client->flush();
         for (int i = 0; i < n; ++i) {
             if (events[i].data.fd != client->getFd()) {
                 continue;
@@ -111,6 +128,13 @@ void netLoop(TcpClient* client, pool* pool) {
             while (!msg.empty()) {
                 parseOpt(msg, last_recv);
                 msg = client->recvData();
+            }
+            if (client->isClosed()) {
+                pushOpt("与服务器断开连接\n");
+                g_running = false;
+                g_ipt_cv.notify_all();
+                g_rsp_cv.notify_all();
+                break;
             }
         }
     }
@@ -130,8 +154,9 @@ void ioLoop() {
     while (g_running) {
         int n = epoll_wait(epfd, events, 2, 100);
         if (n < 0) {
-            if (errno == EINTR)
+            if (errno == EINTR) {
                 continue;
+            }
             break;
         }
         for (int i = 0; i < n; i++) {
@@ -192,7 +217,11 @@ void parseOpt(const string& msg, chrono::steady_clock::time_point& last_recv) {
             rsp = string(js["name"]) + string(js["msg"]);
         }
         if (type == 13) {
-            rsp = "好友" + to_string(js["id"]) + "发来一条新消息";
+            if (isCurrentSession(0, js["id"])) {
+                rsp = string(js["msg"]);
+            } else {
+                rsp = "收到一条消息";
+            }
         }
         if (type == 17) {
             rsp = string(js["msg"]) + string(js["group_name"]);
@@ -204,7 +233,11 @@ void parseOpt(const string& msg, chrono::steady_clock::time_point& last_recv) {
             rsp = string(js["msg"]);
         }
         if (type == 25) {
-            rsp = "群聊" + to_string(js["group_id"]) + "发来一条新消息";
+            if (isCurrentSession(1, js["group_id"])) {
+                rsp = string(js["msg"]);
+            } else {
+                rsp = "收到一条消息";
+            }
         }
         pushOpt(rsp + "\n");
         return;
@@ -214,8 +247,9 @@ void parseOpt(const string& msg, chrono::steady_clock::time_point& last_recv) {
 
 void printOpt() {
     auto msgs = popOpt();
-    if (msgs.empty())
+    if (msgs.empty()) {
         return;
+    }
 
     int saved_point = rl_point;
     char* saved_line = rl_copy_text(0, rl_end);
@@ -261,8 +295,9 @@ void pushIpt(const string& smsg) {
 string popIpt() {
     unique_lock<mutex> lk(g_ipt_mtx);
     g_ipt_cv.wait(lk, [] { return !g_ipt_que.empty() || !g_running; });
-    if (!g_running || g_ipt_que.empty())
+    if (!g_running || g_ipt_que.empty()) {
         return "";
+    }
     string s = g_ipt_que.front();
     g_ipt_que.pop();
     return s;
@@ -279,8 +314,9 @@ void pushRsp(const json& js) {
 json popRsp() {
     unique_lock<mutex> lk(g_rsp_mtx);
     g_rsp_cv.wait(lk, [] { return !g_rsp_que.empty() || !g_running; });
-    if (!g_running || g_rsp_que.empty())
+    if (!g_running || g_rsp_que.empty()) {
         return json();
+    }
     json js = g_rsp_que.front();
     g_rsp_que.pop();
     return js;
@@ -289,6 +325,43 @@ json popRsp() {
 void setPrefix(const string& prefix) {
     lock_guard<mutex> lk(g_ui_mutex);
     g_prefix = prefix;
+}
+
+void showTip(const string& msg) {
+    system("clear");
+    pushOpt(msg + "\n");
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+}
+
+bool confirm(const string& msg) {
+    system("clear");
+    pushOpt("======================\n");
+    pushOpt(msg + "\n");
+    pushOpt("1. 确认    2. 取消\n");
+    pushOpt("======================\n");
+    pushOpt("请选择:\n");
+    setPrefix("选择:");
+    while (g_running) {
+        string input = popIpt();
+        if (input == "1") {
+            return true;
+        } else if (input == "2") {
+            return false;
+        }
+        pushOpt("\033[A\033[K请选择:\n");
+    }
+    return false;
+}
+
+void setChatSession(int type, int id) {
+    lock_guard<mutex> lk(g_chat_mtx);
+    g_chat_type = type;
+    g_chat_id = id;
+}
+
+bool isCurrentSession(int type, int id) {
+    lock_guard<mutex> lk(g_chat_mtx);
+    return g_chat_type == type && g_chat_id == id;
 }
 
 void authOptions(TcpClient& client) {
@@ -352,8 +425,9 @@ void signUp(TcpClient& client) {
                 req["password"] = password;
                 client.sendData(req.dump());
                 json rsp = popRsp();
-                if (!g_running)
+                if (!g_running) {
                     return;
+                }
                 if (rsp["code"] == 1) {
                     pushOpt(string(rsp["msg"]) + "\n");
                     return;
@@ -412,10 +486,12 @@ void passwordSignIn(TcpClient& client) {
                 req["password"] = password;
                 client.sendData(req.dump());
                 json rsp = popRsp();
-                if (!g_running)
+                if (!g_running) {
                     return;
+                }
                 if (rsp["code"] == 1) {
-                    home(client, rsp);
+                    g_user = rsp;
+                    home(client);
                     return;
                 } else {
                     pushOpt("======================\n");
@@ -460,8 +536,9 @@ void codeSignIn(TcpClient& client) {
         req["email"] = email;
         client.sendData(req.dump());
         json rsp = popRsp();
-        if (!g_running)
+        if (!g_running) {
             return;
+        }
         if (rsp["code"] != 1) {
             pushOpt("======================\n");
             pushOpt(string(rsp["msg"]) + "\n");
@@ -496,10 +573,12 @@ void codeSignIn(TcpClient& client) {
                 req["code"] = code;
                 client.sendData(req.dump());
                 rsp = popRsp();
-                if (!g_running)
+                if (!g_running) {
                     return;
+                }
                 if (rsp["code"] == 1) {
-                    home(client, rsp);
+                    g_user = rsp;
+                    home(client);
                     return;
                 } else {
                     pushOpt("======================\n");
@@ -530,7 +609,7 @@ void codeSignIn(TcpClient& client) {
     }
 }
 
-void home(TcpClient& client, const json& user) {
+void home(TcpClient& client) {
     while (g_running) {
         system("clear");
         pushOpt("──────── 首页 ────────\n");
@@ -542,21 +621,270 @@ void home(TcpClient& client, const json& user) {
         pushOpt("请选择:\n");
         setPrefix("选择:");
         string input = popIpt();
-        if (!g_running || input.empty())
-            continue;
         if (input == "1") {
-            pushOpt("── 好友 ──\n");
+            friendPage(client);
         } else if (input == "2") {
             pushOpt("── 群聊 ──\n");
         } else if (input == "3") {
-            if (!settings(client, user)) {
+            if (!settings(client)) {
                 return;
             }
         }
     }
 }
 
-bool settings(TcpClient& client, const json& user) {
+void friendPage(TcpClient& client) {
+    while (g_running) {
+        system("clear");
+        pushOpt("──────── 好友 ────────\n");
+        pushOpt("======================\n");
+        pushOpt("1. 添加好友\n");
+        pushOpt("2. 好友列表\n");
+        pushOpt("3. 返回\n");
+        pushOpt("======================\n");
+        pushOpt("请选择:\n");
+        setPrefix("选择:");
+        string input = popIpt();
+        if (input == "1") {
+            addFriend(client);
+        } else if (input == "2") {
+            friendList(client);
+        } else if (input == "3") {
+            return;
+        }
+    }
+}
+
+void addFriend(TcpClient& client) {
+    while (g_running) {
+        system("clear");
+        pushOpt("────── 添加好友 ──────\n");
+        pushOpt("======================\n");
+        pushOpt("请输入对方邮箱:\n");
+        setPrefix("对方邮箱:");
+        string email = popIpt();
+        json req;
+        req["type"] = 9;
+        req["email"] = email;
+        req["my_email"] = g_user["email"];
+        req["name"] = g_user["name"];
+        client.sendData(req.dump());
+        json rsp = popRsp();
+        if (!g_running) {
+            return;
+        }
+        pushOpt(string(rsp["msg"]) + "\n");
+        pushOpt("======================\n");
+        pushOpt("1. 继续添加    2. 返回\n");
+        pushOpt("======================\n");
+        pushOpt("请选择:\n");
+        setPrefix("选择:");
+        while (g_running) {
+            string input = popIpt();
+            if (input == "1") {
+                break;
+            } else if (input == "2") {
+                return;
+            }
+            pushOpt("\033[A\033[K请选择:\n");
+        }
+    }
+}
+
+void friendList(TcpClient& client) {
+    while (g_running) {
+        system("clear");
+        json req;
+        req["type"] = 8;
+        client.sendData(req.dump());
+        json rsp = popRsp();
+        if (!g_running) {
+            return;
+        }
+        if (rsp["code"] != 1) {
+            showTip(string(rsp["msg"]));
+            return;
+        }
+        pushOpt("────── 好友列表 ──────\n");
+        pushOpt("======================\n");
+        pushOpt("0. 返回\n");
+        int cnt = 0;
+        for (auto& f : rsp["friends"]) {
+            cnt++;
+            int id = f["id"];
+            int state = f["state"];
+            int status = f["status"];
+            string relation;
+            if (status == 2) {
+                relation = "好友";
+            } else if (status == 3) {
+                relation = "已拉黑";
+            } else if (status == 0) {
+                relation = "待我处理";
+            } else {
+                relation = "待对方同意";
+            }
+            string online = (state == 1) ? "在线" : "离线";
+            pushOpt(to_string(id) + " " + string(f["email"]) + " " + relation +
+                    " " + online + "\n");
+        }
+        if (cnt == 0) {
+            pushOpt("（暂无好友）\n");
+        }
+        pushOpt("======================\n");
+        pushOpt("请输入 id 或 0 :\n");
+        setPrefix("好友id:");
+        string input = popIpt();
+        if (input == "0") {
+            return;
+        }
+        for (auto& f : rsp["friends"]) {
+            int fid = f["id"];
+            if (to_string(fid) == input) {
+                friendMenu(client, f);
+                break;
+            }
+        }
+    }
+}
+
+void friendMenu(TcpClient& client, const json& f) {
+    int id = f["id"];
+    int status = f["status"];
+    while (g_running) {
+        system("clear");
+        pushOpt("────── 好友操作 ──────\n");
+        pushOpt("======================\n");
+        pushOpt(string(f["name"]) + "(" + string(f["email"]) + ")\n");
+        pushOpt("======================\n");
+        if (status == 2) {
+            pushOpt("1. 私聊\n");
+            pushOpt("2. 查看聊天记录\n");
+            pushOpt("3. 拉黑\n");
+            pushOpt("4. 删除\n");
+            pushOpt("5. 返回\n");
+        } else if (status == 3) {
+            pushOpt("1. 查看聊天记录\n");
+            pushOpt("2. 取消拉黑\n");
+            pushOpt("3. 删除\n");
+            pushOpt("4. 返回\n");
+        } else if (status == 0) {
+            pushOpt("1. 同意\n");
+            pushOpt("2. 拒绝\n");
+            pushOpt("3. 返回\n");
+        } else {
+            pushOpt("等待对方同意\n");
+            pushOpt("1. 返回\n");
+        }
+        pushOpt("======================\n");
+        pushOpt("请选择:\n");
+        setPrefix("选择:");
+        string input = popIpt();
+        json req;
+        bool send = false;
+        if (status == 2) {
+            if (input == "1") {
+                chat(client, f);
+                continue;
+            } else if (input == "2") {
+                showTip("查看聊天记录功能待实现");
+                continue;
+            } else if (input == "3") {
+                req["type"] = 11;
+                req["id"] = id;
+                req["block"] = true;
+                send = true;
+            } else if (input == "4") {
+                if (!confirm("确定要删除好友 " + string(f["name"]) + " 吗？")) {
+                    continue;
+                }
+                req["type"] = 12;
+                req["id"] = id;
+                send = true;
+            } else if (input == "5") {
+                return;
+            }
+        } else if (status == 3) {
+            if (input == "1") {
+                showTip("查看聊天记录功能待实现");
+                continue;
+            } else if (input == "2") {
+                req["type"] = 11;
+                req["id"] = id;
+                req["block"] = false;
+                send = true;
+            } else if (input == "3") {
+                if (!confirm("确定要删除好友 " + string(f["name"]) + " 吗？")) {
+                    continue;
+                }
+                req["type"] = 12;
+                req["id"] = id;
+                send = true;
+            } else if (input == "4") {
+                return;
+            }
+        } else if (status == 0) {
+            if (input == "1") {
+                req["type"] = 10;
+                req["id"] = id;
+                req["agree"] = 1;
+                send = true;
+            } else if (input == "2") {
+                req["type"] = 10;
+                req["id"] = id;
+                req["agree"] = 0;
+                send = true;
+            } else if (input == "3") {
+                return;
+            }
+        } else {
+            if (input == "1") {
+                return;
+            }
+        }
+        if (!send) {
+            continue;
+        }
+
+        client.sendData(req.dump());
+        json rsp = popRsp();
+        if (!g_running) {
+            return;
+        }
+        showTip(string(rsp["msg"]));
+        return;
+    }
+}
+
+void chat(TcpClient& client, const json& f) {
+    int id = f["id"];
+    string name = f["name"];
+    setChatSession(0, id);
+    system("clear");
+    pushOpt("────── 与 " + name + " 私聊 ──────\n");
+    pushOpt("======================\n");
+    pushOpt("（输入消息，/q 退出）\n");
+    pushOpt("======================\n");
+    setPrefix("我:");
+    while (g_running) {
+        string input = popIpt();
+        if (!g_running) {
+            break;
+        }
+        if (input == "/q") {
+            break;
+        }
+        json req;
+        req["type"] = 13;
+        req["id"] = id;
+        req["msg"] = input;
+        req["msg_type"] = false;
+        client.sendData(req.dump());
+    }
+    setChatSession(-1, -1);
+}
+
+bool settings(TcpClient& client) {
     while (g_running) {
         system("clear");
         pushOpt("──────── 设置 ────────\n");
@@ -570,7 +898,7 @@ bool settings(TcpClient& client, const json& user) {
         setPrefix("选择:");
         string input = popIpt();
         if (input == "1") {
-            changePassword(client, user);
+            changePassword(client);
             continue;
         } else if (input == "2") {
             if (signOut(client)) {
@@ -588,7 +916,7 @@ bool settings(TcpClient& client, const json& user) {
     return false;
 }
 
-void changePassword(TcpClient& client, const json& user) {  //
+void changePassword(TcpClient& client) {  //
     system("clear");
     pushOpt("────── 更改密码 ──────\n");
     pushOpt("======================\n");
@@ -597,13 +925,14 @@ void changePassword(TcpClient& client, const json& user) {  //
     string password = popIpt();
     json req;
     req["type"] = 3;
-    req["email"] = user["email"];
+    req["email"] = g_user["email"];
     while (g_running) {
         pushOpt("正在发送验证码...");
         client.sendData(req.dump());
         json rsp = popRsp();
-        if (!g_running)
+        if (!g_running) {
             return;
+        }
         if (rsp["code"] != 1) {
             pushOpt("======================\n");
             pushOpt(string(rsp["msg"]) + "\n");
@@ -636,8 +965,9 @@ void changePassword(TcpClient& client, const json& user) {  //
         req["password"] = password;
         client.sendData(req.dump());
         json rsp = popRsp();
-        if (!g_running)
+        if (!g_running) {
             return;
+        }
         if (rsp["code"] != 1) {
             pushOpt("======================\n");
             pushOpt(string(rsp["msg"]) + "\n");
@@ -683,9 +1013,11 @@ bool signOut(TcpClient& client) {
     }
     client.sendData(R"({"type":7})");
     json rsp = popRsp();
-    if (!g_running)
+    if (!g_running) {
         return false;
+    }
     pushOpt(string(rsp["msg"]) + "\n");
+    g_user = json();
     return true;
 }
 
@@ -709,8 +1041,10 @@ bool exitLogin(TcpClient& client) {
     }
     client.sendData(R"({"type":6})");
     json rsp = popRsp();
-    if (!g_running)
+    if (!g_running) {
         return false;
+    }
     pushOpt(string(rsp["msg"]) + "\n");
+    g_user = json();
     return true;
 }
