@@ -2,6 +2,7 @@
 #include <signal.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <atomic>
 #include <chrono>
@@ -11,7 +12,9 @@
 #include <cstring>
 #include <ctime>
 #include <deque>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <queue>
@@ -73,6 +76,10 @@ void addFriend(TcpClient& client);
 void friendList(TcpClient& client);
 void friendMenu(TcpClient& client, const json& f);
 void chat(TcpClient& client, const json& f);
+void showHistory(TcpClient& client, const json& f, int scope);
+void viewHistory(TcpClient& client, const json& f);
+void uploadFile(TcpClient& client, int id, const string& path);
+void downloadFile(TcpClient& client, const string& ref);
 bool settings(TcpClient& client);
 void changePassword(TcpClient& client);
 bool signOut(TcpClient& client);
@@ -80,6 +87,7 @@ bool exitLogin(TcpClient& client);
 
 int main(int argc, char* argv[]) {
     signal(SIGPIPE, SIG_IGN);
+    mkdir("./downloads", 0755);
     string host = (argc > 1) ? argv[1] : "127.0.0.1";
     int port = (argc > 2) ? stoi(argv[2]) : 8000;
     TcpClient client;
@@ -169,7 +177,6 @@ void ioLoop() {
             }
         }
     }
-
     rl_callback_handler_remove();
     close(epfd);
 }
@@ -187,7 +194,11 @@ void on_line(char* line) {
         prefix = g_prefix;
     }
     if (*line) {
-        fprintf(rl_outstream, "\033[A\033[A\033[K%s %s\n", prefix.c_str(),
+        string l(line);
+        for (int i = 0; i < l.size() / 80; i++) {
+            cout << "\033[A\033[K";
+        }
+        fprintf(rl_outstream, "\033[A\033[K\033[A\033[K%s %s\n", prefix.c_str(),
                 line);
         pushIpt(line);
     } else {
@@ -217,10 +228,13 @@ void parseOpt(const string& msg, chrono::steady_clock::time_point& last_recv) {
             rsp = string(js["name"]) + string(js["msg"]);
         }
         if (type == 13) {
+            bool is_file = js["msg_type"];
             if (isCurrentSession(0, js["id"])) {
-                rsp = string(js["msg"]);
+                rsp = is_file ? "[文件] " + string(js["msg"])
+                              : string(js["msg"]);
             } else {
-                rsp = "收到一条消息";
+                rsp = is_file ? "好友" + string(js["name"]) + "发来一个文件"
+                              : "好友" + string(js["name"]) + "发来一条消息";
             }
         }
         if (type == 17) {
@@ -236,7 +250,7 @@ void parseOpt(const string& msg, chrono::steady_clock::time_point& last_recv) {
             if (isCurrentSession(1, js["group_id"])) {
                 rsp = string(js["msg"]);
             } else {
-                rsp = "收到一条消息";
+                rsp = "群聊" + string(js["group_name"]) + "发来一条消息";
             }
         }
         pushOpt(rsp + "\n");
@@ -764,10 +778,11 @@ void friendMenu(TcpClient& client, const json& f) {
             pushOpt("4. 删除\n");
             pushOpt("5. 返回\n");
         } else if (status == 3) {
-            pushOpt("1. 查看聊天记录\n");
-            pushOpt("2. 取消拉黑\n");
-            pushOpt("3. 删除\n");
-            pushOpt("4. 返回\n");
+            pushOpt("1. 私聊\n");
+            pushOpt("2. 查看聊天记录\n");
+            pushOpt("3. 取消拉黑\n");
+            pushOpt("4. 删除\n");
+            pushOpt("5. 返回\n");
         } else if (status == 0) {
             pushOpt("1. 同意\n");
             pushOpt("2. 拒绝\n");
@@ -787,7 +802,7 @@ void friendMenu(TcpClient& client, const json& f) {
                 chat(client, f);
                 continue;
             } else if (input == "2") {
-                showTip("查看聊天记录功能待实现");
+                viewHistory(client, f);
                 continue;
             } else if (input == "3") {
                 req["type"] = 11;
@@ -806,21 +821,24 @@ void friendMenu(TcpClient& client, const json& f) {
             }
         } else if (status == 3) {
             if (input == "1") {
-                showTip("查看聊天记录功能待实现");
+                chat(client, f);
                 continue;
             } else if (input == "2") {
+                viewHistory(client, f);
+                continue;
+            } else if (input == "3") {
                 req["type"] = 11;
                 req["id"] = id;
                 req["block"] = false;
                 send = true;
-            } else if (input == "3") {
+            } else if (input == "4") {
                 if (!confirm("确定要删除好友 " + string(f["name"]) + " 吗？")) {
                     continue;
                 }
                 req["type"] = 12;
                 req["id"] = id;
                 send = true;
-            } else if (input == "4") {
+            } else if (input == "5") {
                 return;
             }
         } else if (status == 0) {
@@ -861,9 +879,10 @@ void chat(TcpClient& client, const json& f) {
     string name = f["name"];
     setChatSession(0, id);
     system("clear");
-    pushOpt("────── 与 " + name + " 私聊 ──────\n");
-    pushOpt("======================\n");
+    pushOpt("私聊: " + name + "\n");
     pushOpt("（输入消息，/q 退出）\n");
+    pushOpt("======================\n");
+    showHistory(client, f, 0);
     pushOpt("======================\n");
     setPrefix("我:");
     while (g_running) {
@@ -874,14 +893,164 @@ void chat(TcpClient& client, const json& f) {
         if (input == "/q") {
             break;
         }
+        if (input.rfind("put ", 0) == 0) {
+            uploadFile(client, id, input.substr(4));
+            continue;
+        }
+        if (input.rfind("get ", 0) == 0) {
+            downloadFile(client, input.substr(4));
+            continue;
+        }
         json req;
         req["type"] = 13;
         req["id"] = id;
         req["msg"] = input;
         req["msg_type"] = false;
         client.sendData(req.dump());
+        json rsp = popRsp();
+        if (rsp["code"] != 1) {
+            pushOpt(string(rsp["msg"]) + "\n");
+        }
+        pushOpt("======================\n");
     }
     setChatSession(-1, -1);
+}
+
+void showHistory(TcpClient& client, const json& f, int scope) {
+    int id = f["id"];
+    string name = f["name"];
+    int my_id = g_user["id"];
+    json req;
+    req["type"] = 14;
+    req["id"] = id;
+    req["scope"] = scope;
+    client.sendData(req.dump());
+    json rsp = popRsp();
+    if (!g_running) {
+        return;
+    }
+    if (rsp["code"] != 1) {
+        showTip(string(rsp["msg"]));
+        return;
+    }
+    if (rsp["msg"].empty()) {
+        pushOpt("（暂无聊天记录）\n");
+    }
+    for (auto& m : rsp["msg"]) {
+        int sender_id = m["sender_id"];
+        int is_file = m["is_file"];
+        string content = m["content"];
+        if (is_file == 1) {
+            content = "[文件] " + content;
+        }
+        string who = (sender_id == my_id) ? "我" : name;
+        pushOpt(who + ": " + content + "\n");
+    }
+}
+
+void viewHistory(TcpClient& client, const json& f) {
+    system("clear");
+    pushOpt("======================\n");
+    showHistory(client, f, 1);
+    pushOpt("======================\n");
+    pushOpt("聊天记录: " + string(f["name"]) + "\n");
+    pushOpt("（输入任意内容返回）\n");
+    setPrefix("返回:");
+    popIpt();
+}
+
+string base64Encode(const string& data) {
+    static const char* table =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    string encoded;
+    int val = 0, bits = -6;
+    for (unsigned char c : data) {
+        val = (val << 8) + c;
+        bits += 8;
+        while (bits >= 0) {
+            encoded.push_back(table[(val >> bits) & 0x3F]);
+            bits -= 6;
+        }
+    }
+    if (bits > -6) {
+        encoded.push_back(table[((val << 6) >> bits) & 0x3F]);
+    }
+    while (encoded.size() % 4) {
+        encoded.push_back('=');
+    }
+    return encoded;
+}
+
+string base64Decode(const string& encoded) {
+    static const char* table =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    int decode_table[256] = {};
+    for (int i = 0; i < 64; i++) {
+        decode_table[static_cast<int>(table[i])] = i;
+    }
+    string decoded;
+    int val = 0, bits = -8;
+    for (unsigned char c : encoded) {
+        if (c == '=') {
+            break;
+        }
+        if (decode_table[c] == 0 && c != 'A') {
+            continue;
+        }
+        val = (val << 6) + decode_table[c];
+        bits += 6;
+        if (bits >= 0) {
+            decoded.push_back(static_cast<char>((val >> bits) & 0xFF));
+            bits -= 8;
+        }
+    }
+    return decoded;
+}
+
+void uploadFile(TcpClient& client, int id, const string& path) {
+    ifstream ifs(path, ios::binary);
+    if (!ifs) {
+        pushOpt("文件不存在: " + path + "\n");
+        return;
+    }
+    string data((istreambuf_iterator<char>(ifs)), istreambuf_iterator<char>());
+    string name = path.substr(path.find_last_of('/') + 1);
+    json req;
+    req["type"] = 13;
+    req["id"] = id;
+    req["msg"] = name;
+    req["msg_type"] = true;
+    req["file_data"] = base64Encode(data);
+    client.sendData(req.dump());
+    json rsp = popRsp();
+    if (rsp["code"] != 1) {
+        pushOpt(string(rsp["msg"]) + "\n");
+    } else {
+        pushOpt("文件已发送\n");
+    }
+    pushOpt("======================\n");
+}
+
+void downloadFile(TcpClient& client, const string& ref) {
+    json req;
+    req["type"] = 27;
+    req["msg"] = ref;
+    client.sendData(req.dump());
+    json rsp = popRsp();
+    if (rsp["code"] != 1) {
+        pushOpt(string(rsp["msg"]) + "\n");
+        return;
+    }
+    string name = ref;
+    size_t pos = name.find('_');
+    if (pos != string::npos) {
+        name = name.substr(pos + 1);
+    }
+    string data = base64Decode(string(rsp["file_data"]));
+    ofstream ofs("./downloads/" + name, ios::binary);
+    ofs.write(data.data(), data.size());
+    pushOpt("文件已保存为: downloads/" + name + "\n");
+    pushOpt("======================\n");
 }
 
 bool settings(TcpClient& client) {

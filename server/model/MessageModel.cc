@@ -18,9 +18,17 @@ int MessageModel::insert(int sender_id,
     return m_mysql.updateAndGetId(sql);
 }
 
+bool MessageModel::updateContent(int msg_id, const std::string& content) {
+    char sql[1024] = {0};
+    snprintf(sql, sizeof(sql),
+             "UPDATE message SET content = '%s' WHERE id = %d;",
+             content.c_str(), msg_id);
+    return m_mysql.update(sql);
+}
+
 std::vector<json> MessageModel::queryHistory(int user_id, int friend_id, int scope) {
     char sql[1024] = {0};
-    const char* limit = (scope == 0) ? "LIMIT 20" : "";
+    const char* limit = (scope == 0) ? "LIMIT 19" : "";
     snprintf(sql, sizeof(sql),
              "SELECT sender_id, content, send_time, is_file FROM ("
              "SELECT sender_id, content, send_time, is_file FROM message "

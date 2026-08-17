@@ -73,12 +73,14 @@ MYSQL* MySQL::transaction() {
 
 bool MySQL::commit(MYSQL* conn) {
     bool res = mysql_commit(conn);
+    mysql_autocommit(conn, true);
     m_pool->returnConn(conn);
     return res == 0;
 }
 
 bool MySQL::rollback(MYSQL* conn) {
     bool res = mysql_rollback(conn);
+    mysql_autocommit(conn, true);
     m_pool->returnConn(conn);
     return res == 0;
 }

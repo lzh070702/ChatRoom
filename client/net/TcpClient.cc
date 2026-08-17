@@ -42,14 +42,16 @@ std::string TcpClient::recvData() {
         if (n > 0) {
             m_buf.append(buf, static_cast<size_t>(n));
         } else if (n == 0) {
-            return "";
+            m_closed = true;
+            break;
         } else {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 break;
             } else if (errno == EINTR) {
                 continue;
             } else {
-                return "";
+                m_closed = true;
+                break;
             }
         }
     }
@@ -66,17 +68,24 @@ bool TcpClient::sendData(std::string msg) {
     if (m_fd == -1) {
         return false;
     }
-    msg += '\n';
-    size_t sent = 0;
-    while (sent < msg.size()) {
-        ssize_t n = write(m_fd, msg.data() + sent, msg.size() - sent);
+    {
+        std::lock_guard<std::mutex> lk(m_write_mtx);
+        m_write_buf.append(msg).append("\n");
+    }
+    return flush();
+}
+
+bool TcpClient::flush() {
+    std::lock_guard<std::mutex> lk(m_write_mtx);
+    while (!m_write_buf.empty()) {
+        ssize_t n = write(m_fd, m_write_buf.data(), m_write_buf.size());
         if (n > 0) {
-            sent += static_cast<size_t>(n);
+            m_write_buf.erase(0, static_cast<size_t>(n));
         } else if (n == 0) {
             return false;
         } else {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                break;
+                return false;
             } else if (errno == EINTR) {
                 continue;
             } else {
@@ -84,7 +93,7 @@ bool TcpClient::sendData(std::string msg) {
             }
         }
     }
-    return sent == msg.size();
+    return true;
 }
 
 void TcpClient::closeFd() {

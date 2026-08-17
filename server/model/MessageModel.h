@@ -18,6 +18,7 @@ class MessageModel {
                int type,
                const std::string& msg,
                bool is_file);
+    bool updateContent(int msg_id, const std::string& content);
     std::vector<json> queryHistory(int user_id, int friend_id, int scope = 0);
     std::vector<json> queryGroupHistory(int group_id, int scope = 0);
     bool removeAll(int user_id);

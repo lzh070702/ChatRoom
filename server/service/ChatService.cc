@@ -536,7 +536,7 @@ void ChatService::oneChat(std::shared_ptr<Connection> conn, const json& js) {
             conn, R"({"type":13,"code":0,"msg":"该用户已注销"})");
         return;
     }
-    if (m_friend_model.isFriend(user_id, friend_id) != 2) {
+    if (m_friend_model.isFriend(user_id, friend_id) < 2) {
         conn->getReactor()->handleWrite(
             conn, R"({"type":13,"code":0,"msg":"不是好友，无法聊天"})");
         return;
@@ -556,11 +556,15 @@ void ChatService::oneChat(std::shared_ptr<Connection> conn, const json& js) {
     if (is_file) {
         saveFile(msg_id, content, js["file_data"]);
         content = std::to_string(msg_id) + "_" + content;
+        m_message_model.updateContent(msg_id, content);
     }
+    User sender;
+    m_user_model.queryById(user_id, sender);
     json response;
     response["type"] = 13;
     response["code"] = 2;
     response["id"] = user_id;
+    response["name"] = sender.getName();
     response["msg"] = content;
     response["msg_type"] = js["msg_type"];
     std::shared_ptr<Connection> friend_conn;
@@ -575,13 +579,18 @@ void ChatService::oneChat(std::shared_ptr<Connection> conn, const json& js) {
         friend_conn->getReactor()->post([friend_conn, data = response.dump()] {
             friend_conn->sendData(data + '\n');
         });
+        conn->getReactor()->handleWrite(
+            conn, R"({"type":13,"code":1,"msg":"发送成功"})");
         return;
     }
     if (!m_redis.lpush("offline_msg:" + std::to_string(friend_id),
                        response.dump())) {
         conn->getReactor()->handleWrite(
             conn, R"({"type":13,"code":0,"msg":"消息发送失败"})");
+        return;
     }
+    conn->getReactor()->handleWrite(conn,
+                                    R"({"type":13,"code":1,"msg":"发送成功"})");
 }
 
 void ChatService::queryHistory(std::shared_ptr<Connection> conn,
@@ -944,6 +953,7 @@ void ChatService::groupChat(std::shared_ptr<Connection> conn, const json& js) {
     if (is_file) {
         saveFile(msg_id, content, js["file_data"]);
         content = std::to_string(msg_id) + "_" + content;
+        m_message_model.updateContent(msg_id, content);
     }
     auto members = m_group_model.queryMembers(group_id);
     json response;
@@ -951,6 +961,7 @@ void ChatService::groupChat(std::shared_ptr<Connection> conn, const json& js) {
     response["code"] = 2;
     response["group_id"] = group_id;
     response["sender_id"] = user_id;
+    response["group_name"] = m_group_model.getGroupName(group_id);
     response["msg"] = content;
     response["msg_type"] = js["msg_type"];
     for (auto& [member_id, role] : members) {
