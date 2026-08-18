@@ -7,14 +7,14 @@
 bool settings(TcpClient& client) {
     while (g_running) {
         system("clear");
-        pushOpt("──────── 设置 ────────\n");
-        pushOpt("======================\n");
-        pushOpt("1. 更改密码\n");
-        pushOpt("2. 注销账号\n");
-        pushOpt("3. 退出登录\n");
-        pushOpt("4. 返回\n");
-        pushOpt("======================\n");
-        pushOpt("请选择:\n");
+        pushOpt("──────── 设置 ────────");
+        pushOpt("======================");
+        pushOpt("1. 更改密码");
+        pushOpt("2. 注销账号");
+        pushOpt("3. 退出登录");
+        pushOpt("4. 返回");
+        pushOpt("======================");
+        setPrompt("请选择:");
         setPrefix("选择:");
         std::string input = popIpt();
         if (input == "1") {
@@ -36,11 +36,11 @@ bool settings(TcpClient& client) {
     return false;
 }
 
-void changePassword(TcpClient& client) {  //
+void changePassword(TcpClient& client) {
     system("clear");
-    pushOpt("────── 更改密码 ──────\n");
-    pushOpt("======================\n");
-    pushOpt("请输入新密码:\n");
+    pushOpt("────── 更改密码 ──────");
+    pushOpt("======================");
+    setPrompt("请输入新密码:");
     setPrefix("新密码:");
     std::string password = popIpt();
     json req;
@@ -54,12 +54,12 @@ void changePassword(TcpClient& client) {  //
             return;
         }
         if (rsp["code"] != 1) {
-            pushOpt("======================\n");
-            pushOpt(std::string(rsp["msg"]) + "\n");
-            pushOpt("是否重新发送？\n");
-            pushOpt("1. 确认    2. 返回\n");
-            pushOpt("======================\n");
-            pushOpt("请选择\n");
+            pushOpt("======================");
+            pushOpt(RED + std::string(rsp["msg"]) + RESET);
+            pushOpt("是否重新发送？");
+            pushOpt("1. 确认    2. 返回");
+            pushOpt("======================");
+            setPrompt("请选择");
             setPrefix("选择:");
             while (g_running) {
                 std::string input = popIpt();
@@ -70,14 +70,14 @@ void changePassword(TcpClient& client) {  //
                 } else if (input == "2") {
                     return;
                 }
-                pushOpt("\033[A\033[K请选择:\n");
+                pushOpt("\033[A\033[K请选择:");
             }
         } else {
             break;
         }
     }
     while (g_running) {
-        pushOpt("验证码已发送，请输入验证码:\n");
+        setPrompt("验证码已发送，请输入验证码:");
         setPrefix("验证码:");
         std::string code = popIpt();
         req["type"] = 5;
@@ -89,12 +89,12 @@ void changePassword(TcpClient& client) {  //
             return;
         }
         if (rsp["code"] != 1) {
-            pushOpt("======================\n");
-            pushOpt(std::string(rsp["msg"]) + "\n");
-            pushOpt("是否重新输入？\n");
-            pushOpt("1. 确认    2. 返回\n");
-            pushOpt("======================\n");
-            pushOpt("请选择:\n");
+            pushOpt("======================");
+            pushOpt(RED + std::string(rsp["msg"]) + RESET);
+            pushOpt("是否重新输入？");
+            pushOpt("1. 确认    2. 返回");
+            pushOpt("======================");
+            setPrompt("请选择:");
             setPrefix("选择:");
             while (g_running) {
                 std::string input = popIpt();
@@ -105,9 +105,10 @@ void changePassword(TcpClient& client) {  //
                 } else if (input == "2") {
                     return;
                 }
-                pushOpt("\033[A\033[K请选择:\n");
+                pushOpt("\033[A\033[K请选择:");
             }
         } else {
+            showTip(GREEN + std::string(rsp["msg"]) + RESET);
             break;
         }
     }
@@ -115,56 +116,41 @@ void changePassword(TcpClient& client) {  //
 
 bool signOut(TcpClient& client) {
     system("clear");
-    pushOpt("────── 注销账号 ──────\n");
-    pushOpt("======================\n");
-    pushOpt("确定要注销账号吗？此操作不可恢复！\n");
-    pushOpt("1. 确认    2. 返回\n");
-    pushOpt("======================\n");
-    pushOpt("请选择:\n");
-    setPrefix("选择:");
-    while (g_running) {
-        std::string input = popIpt();
-        if (input == "1") {
-            break;
-        } else if (input == "2") {
-            return false;
-        }
-        pushOpt("\033[A\033[K请选择:\n");
+    pushOpt("────── 注销账号 ──────");
+    if (!confirm(YELLOW + std::string("确定要注销账号吗？此操作不可恢复！") +
+                 RESET)) {
+        return false;
     }
     client.sendData(R"({"type":7})");
     json rsp = popRsp();
     if (!g_running) {
         return false;
     }
-    pushOpt(std::string(rsp["msg"]) + "\n");
+    if (rsp["code"] != 1) {
+        showTip(RED + std::string(rsp["msg"]) + RESET);
+    } else {
+        showTip(GREEN + std::string(rsp["msg"]) + RESET);
+    }
     g_user = json();
     return true;
 }
 
 bool exitLogin(TcpClient& client) {
     system("clear");
-    pushOpt("────── 退出登录 ──────\n");
-    pushOpt("======================\n");
-    pushOpt("确定要退出登录吗？\n");
-    pushOpt("1. 确认    2. 返回\n");
-    pushOpt("======================\n");
-    pushOpt("请选择:\n");
-    setPrefix("选择:");
-    while (g_running) {
-        std::string input = popIpt();
-        if (input == "1") {
-            break;
-        } else if (input == "2") {
-            return false;
-        }
-        pushOpt("\033[A\033[K请选择:\n");
+    pushOpt("────── 退出登录 ──────");
+    if (!confirm(YELLOW + std::string("确定要退出登录吗？") + RESET)) {
+        return false;
     }
     client.sendData(R"({"type":6})");
     json rsp = popRsp();
     if (!g_running) {
         return false;
     }
-    pushOpt(std::string(rsp["msg"]) + "\n");
+    if (rsp["code"] != 1) {
+        showTip(RED + std::string(rsp["msg"]) + RESET);
+    } else {
+        showTip(GREEN + std::string(rsp["msg"]) + RESET);
+    }
     g_user = json();
     return true;
 }

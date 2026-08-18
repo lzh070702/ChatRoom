@@ -11,13 +11,13 @@
 void home(TcpClient& client) {
     while (g_running) {
         system("clear");
-        pushOpt("──────── 首页 ────────\n");
-        pushOpt("======================\n");
-        pushOpt("1. 好友\n");
-        pushOpt("2. 群聊\n");
-        pushOpt("3. 设置\n");
-        pushOpt("======================\n");
-        pushOpt("请选择:\n");
+        pushOpt("──────── 首页 ────────");
+        pushOpt("======================");
+        pushOpt("1. 好友");
+        pushOpt("2. 群聊");
+        pushOpt("3. 设置");
+        pushOpt("======================");
+        setPrompt("请选择:");
         setPrefix("选择:");
         std::string input = popIpt();
         if (input == "1") {
@@ -35,13 +35,13 @@ void home(TcpClient& client) {
 void friendPage(TcpClient& client) {
     while (g_running) {
         system("clear");
-        pushOpt("──────── 好友 ────────\n");
-        pushOpt("======================\n");
-        pushOpt("1. 添加好友\n");
-        pushOpt("2. 好友列表\n");
-        pushOpt("3. 返回\n");
-        pushOpt("======================\n");
-        pushOpt("请选择:\n");
+        pushOpt("──────── 好友 ────────");
+        pushOpt("======================");
+        pushOpt("1. 添加好友");
+        pushOpt("2. 好友列表");
+        pushOpt("3. 返回");
+        pushOpt("======================");
+        setPrompt("请选择:");
         setPrefix("选择:");
         std::string input = popIpt();
         if (input == "1") {
@@ -57,9 +57,9 @@ void friendPage(TcpClient& client) {
 void addFriend(TcpClient& client) {
     while (g_running) {
         system("clear");
-        pushOpt("────── 添加好友 ──────\n");
-        pushOpt("======================\n");
-        pushOpt("请输入对方邮箱:\n");
+        pushOpt("────── 添加好友 ──────");
+        pushOpt("======================");
+        setPrompt("请输入对方邮箱:");
         setPrefix("对方邮箱:");
         std::string email = popIpt();
         json req;
@@ -72,11 +72,15 @@ void addFriend(TcpClient& client) {
         if (!g_running) {
             return;
         }
-        pushOpt(std::string(rsp["msg"]) + "\n");
-        pushOpt("======================\n");
-        pushOpt("1. 继续添加    2. 返回\n");
-        pushOpt("======================\n");
-        pushOpt("请选择:\n");
+        if (rsp["code"] == 1) {
+            pushOpt(GREEN + std::string(rsp["msg"]) + RESET);
+        } else {
+            pushOpt(RED + std::string(rsp["msg"]) + RESET);
+        }
+        pushOpt("======================");
+        pushOpt("1. 继续添加    2. 返回");
+        pushOpt("======================");
+        setPrompt("请选择:");
         setPrefix("选择:");
         while (g_running) {
             std::string input = popIpt();
@@ -85,7 +89,7 @@ void addFriend(TcpClient& client) {
             } else if (input == "2") {
                 return;
             }
-            pushOpt("\033[A\033[K请选择:\n");
+            pushOpt("\033[A\033[K请选择:");
         }
     }
 }
@@ -100,17 +104,12 @@ void friendList(TcpClient& client) {
         if (!g_running) {
             return;
         }
-        if (rsp["code"] != 1) {
-            showTip(std::string(rsp["msg"]));
-            return;
-        }
-        pushOpt("────── 好友列表 ──────\n");
-        pushOpt("======================\n");
-        pushOpt("0. 返回\n");
+        pushOpt("────── 好友列表 ──────");
+        pushOpt("======================");
+        pushOpt("0. 返回");
         int cnt = 0;
         for (auto& f : rsp["friends"]) {
             cnt++;
-            int id = f["id"];
             int state = f["state"];
             int status = f["status"];
             std::string relation;
@@ -124,25 +123,23 @@ void friendList(TcpClient& client) {
                 relation = "待对方同意";
             }
             std::string online = (state == 1) ? "在线" : "离线";
-            pushOpt(std::to_string(id) + " " + std::string(f["email"]) + " " +
-                    relation + " " + online + "\n");
+            pushOpt(std::to_string(cnt) + ". " + std::string(f["name"]) + "-" +
+                    std::string(f["email"]) + "（" + online + "） " + relation +
+                    "");
         }
         if (cnt == 0) {
-            pushOpt("（暂无好友）\n");
+            pushOpt("（暂无好友）");
         }
-        pushOpt("======================\n");
-        pushOpt("请输入 id 或 0 :\n");
-        setPrefix("好友id:");
+        pushOpt("======================");
+        setPrompt("请选择好友 :");
+        setPrefix("好友:");
         std::string input = popIpt();
         if (input == "0") {
             return;
         }
-        for (auto& f : rsp["friends"]) {
-            int fid = f["id"];
-            if (std::to_string(fid) == input) {
-                friendMenu(client, f);
-                break;
-            }
+        int idx = atoi(input.c_str());
+        if (idx >= 1 && idx <= cnt) {
+            friendMenu(client, rsp["friends"][idx - 1]);
         }
     }
 }
@@ -152,32 +149,32 @@ void friendMenu(TcpClient& client, const json& f) {
     int status = f["status"];
     while (g_running) {
         system("clear");
-        pushOpt("────── 好友操作 ──────\n");
-        pushOpt("======================\n");
-        pushOpt(std::string(f["name"]) + "(" + std::string(f["email"]) + ")\n");
-        pushOpt("======================\n");
+        pushOpt("────── 好友操作 ──────");
+        pushOpt("======================");
+        pushOpt(std::string(f["name"]) + "(" + std::string(f["email"]) + ")");
+        pushOpt("======================");
         if (status == 2) {
-            pushOpt("1. 私聊\n");
-            pushOpt("2. 查看聊天记录\n");
-            pushOpt("3. 拉黑\n");
-            pushOpt("4. 删除\n");
-            pushOpt("5. 返回\n");
+            pushOpt("1. 私聊");
+            pushOpt("2. 查看聊天记录");
+            pushOpt("3. 拉黑");
+            pushOpt("4. 删除");
+            pushOpt("5. 返回");
         } else if (status == 3) {
-            pushOpt("1. 私聊\n");
-            pushOpt("2. 查看聊天记录\n");
-            pushOpt("3. 取消拉黑\n");
-            pushOpt("4. 删除\n");
-            pushOpt("5. 返回\n");
+            pushOpt("1. 私聊");
+            pushOpt("2. 查看聊天记录");
+            pushOpt("3. 取消拉黑");
+            pushOpt("4. 删除");
+            pushOpt("5. 返回");
         } else if (status == 0) {
-            pushOpt("1. 同意\n");
-            pushOpt("2. 拒绝\n");
-            pushOpt("3. 返回\n");
+            pushOpt("1. 同意");
+            pushOpt("2. 拒绝");
+            pushOpt("3. 返回");
         } else {
-            pushOpt("等待对方同意\n");
-            pushOpt("1. 返回\n");
+            pushOpt("等待对方同意");
+            pushOpt("1. 返回");
         }
-        pushOpt("======================\n");
-        pushOpt("请选择:\n");
+        pushOpt("======================");
+        setPrompt("请选择:");
         setPrefix("选择:");
         std::string input = popIpt();
         json req;
@@ -195,8 +192,9 @@ void friendMenu(TcpClient& client, const json& f) {
                 req["block"] = true;
                 send = true;
             } else if (input == "4") {
-                if (!confirm("确定要删除好友 " + std::string(f["name"]) +
-                             " 吗？")) {
+                if (!confirm(YELLOW + std::string("确定要删除好友 ") +
+                             std::string(f["name"]) + std::string(" 吗？") +
+                             RESET)) {
                     continue;
                 }
                 req["type"] = 12;
@@ -218,8 +216,9 @@ void friendMenu(TcpClient& client, const json& f) {
                 req["block"] = false;
                 send = true;
             } else if (input == "4") {
-                if (!confirm("确定要删除好友 " + std::string(f["name"]) +
-                             " 吗？")) {
+                if (!confirm(YELLOW + std::string("确定要删除好友 ") +
+                             std::string(f["name"]) + std::string(" 吗？") +
+                             RESET)) {
                     continue;
                 }
                 req["type"] = 12;
@@ -256,7 +255,7 @@ void friendMenu(TcpClient& client, const json& f) {
         if (!g_running) {
             return;
         }
-        showTip(std::string(rsp["msg"]));
+        showTip(GREEN + std::string(rsp["msg"]) + RESET);
         return;
     }
 }
@@ -266,11 +265,11 @@ void chat(TcpClient& client, const json& f) {
     std::string name = f["name"];
     setChatSession(0, id);
     system("clear");
-    pushOpt("私聊: " + name + "\n");
-    pushOpt("（输入消息，/q 退出）\n");
-    pushOpt("======================\n");
+    pushOpt("私聊: " + name);
+    pushOpt("（输入消息，/q 退出）");
+    pushOpt("======================");
     showHistory(client, f, 0);
-    pushOpt("======================\n");
+    setPrompt("======================");
     setPrefix("我:");
     while (g_running) {
         std::string input = popIpt();
@@ -296,9 +295,9 @@ void chat(TcpClient& client, const json& f) {
         client.sendData(req.dump());
         json rsp = popRsp();
         if (rsp["code"] != 1) {
-            pushOpt(std::string(rsp["msg"]) + "\n");
+            pushOpt(RED + std::string(rsp["msg"]) + RESET);
         }
-        pushOpt("======================\n");
+        pushOpt("======================");
     }
     setChatSession(-1, -1);
 }
@@ -316,12 +315,8 @@ void showHistory(TcpClient& client, const json& f, int scope) {
     if (!g_running) {
         return;
     }
-    if (rsp["code"] != 1) {
-        showTip(std::string(rsp["msg"]));
-        return;
-    }
     if (rsp["msg"].empty()) {
-        pushOpt("（暂无聊天记录）\n");
+        pushOpt("（暂无聊天记录）");
     }
     for (auto& m : rsp["msg"]) {
         int sender_id = m["sender_id"];
@@ -331,17 +326,17 @@ void showHistory(TcpClient& client, const json& f, int scope) {
             content = "[文件] " + content;
         }
         std::string who = (sender_id == my_id) ? "我" : name;
-        pushOpt(who + ": " + content + "\n");
+        pushOpt(who + ": " + content);
     }
 }
 
 void viewHistory(TcpClient& client, const json& f) {
     system("clear");
-    pushOpt("======================\n");
+    pushOpt("======================");
     showHistory(client, f, 1);
-    pushOpt("======================\n");
-    pushOpt("聊天记录: " + std::string(f["name"]) + "\n");
-    pushOpt("（输入任意内容返回）\n");
+    pushOpt("======================");
+    pushOpt("聊天记录: " + std::string(f["name"]));
+    setPrompt("（输入任意内容返回）");
     setPrefix("返回:");
     popIpt();
 }
@@ -349,7 +344,7 @@ void viewHistory(TcpClient& client, const json& f) {
 void uploadFile(TcpClient& client, int id, const std::string& path) {
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs) {
-        pushOpt("文件不存在: " + path + "\n");
+        pushOpt(RED + std::string("文件不存在: ") + path + RESET);
         return;
     }
     std::string data((std::istreambuf_iterator<char>(ifs)),
@@ -364,11 +359,11 @@ void uploadFile(TcpClient& client, int id, const std::string& path) {
     client.sendData(req.dump());
     json rsp = popRsp();
     if (rsp["code"] != 1) {
-        pushOpt(std::string(rsp["msg"]) + "\n");
+        pushOpt(RED + std::string(rsp["msg"]) + RESET);
     } else {
-        pushOpt("文件已发送\n");
+        pushOpt(GREEN + std::string("文件已发送") + RESET);
     }
-    pushOpt("======================\n");
+    pushOpt("======================");
 }
 
 void downloadFile(TcpClient& client, const std::string& ref) {
@@ -378,7 +373,7 @@ void downloadFile(TcpClient& client, const std::string& ref) {
     client.sendData(req.dump());
     json rsp = popRsp();
     if (rsp["code"] != 1) {
-        pushOpt(std::string(rsp["msg"]) + "\n");
+        pushOpt(RED + std::string(rsp["msg"]) + RESET);
         return;
     }
     std::string name = ref;
@@ -389,6 +384,6 @@ void downloadFile(TcpClient& client, const std::string& ref) {
     std::string data = base64Decode(std::string(rsp["file_data"]));
     std::ofstream ofs("./downloads/" + name, std::ios::binary);
     ofs.write(data.data(), data.size());
-    pushOpt("文件已保存为: downloads/" + name + "\n");
-    pushOpt("======================\n");
+    pushOpt(GREEN + std::string("文件已保存为: downloads/") + name + RESET);
+    pushOpt("======================");
 }

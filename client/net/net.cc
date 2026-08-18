@@ -28,7 +28,7 @@ void netLoop(TcpClient* client) {
             last_send = now;
         }
         if (now - last_recv >= std::chrono::seconds(60)) {
-            pushOpt("与服务器断开连接\n");
+            pushOpt(RED + std::string("与服务器断开连接") + RESET);
             g_running = false;
             g_ipt_cv.notify_all();
             g_rsp_cv.notify_all();
@@ -45,7 +45,7 @@ void netLoop(TcpClient* client) {
                 msg = client->recvData();
             }
             if (client->isClosed()) {
-                pushOpt("与服务器断开连接\n");
+                pushOpt(RED + std::string("与服务器断开连接") + RESET);
                 g_running = false;
                 g_ipt_cv.notify_all();
                 g_rsp_cv.notify_all();
@@ -138,8 +138,9 @@ void parseOpt(const std::string& msg,
         if (type == 13) {
             bool is_file = js["msg_type"];
             if (isCurrentSession(0, js["id"])) {
-                rsp = is_file ? "[文件] " + std::string(js["msg"])
-                              : std::string(js["msg"]);
+                rsp = "\033[0m" + std::string(js["name"]) + ": " +
+                      (is_file ? "[文件] " + std::string(js["msg"])
+                               : std::string(js["msg"]));
             } else {
                 rsp = is_file
                           ? "好友" + std::string(js["name"]) + "发来一个文件"
@@ -159,8 +160,9 @@ void parseOpt(const std::string& msg,
             bool is_file = js["msg_type"];
             std::string sender = js["sender_name"];
             if (isCurrentSession(1, js["group_id"])) {
-                rsp = is_file ? sender + ": [文件] " + std::string(js["msg"])
-                              : sender + ": " + std::string(js["msg"]);
+                rsp = "\033[0m" + sender + ": " +
+                      (is_file ? sender + ": [文件] " + std::string(js["msg"])
+                               : sender + ": " + std::string(js["msg"]));
             } else {
                 rsp = is_file
                           ? sender + " 在群聊" + std::string(js["group_name"]) +
@@ -169,7 +171,13 @@ void parseOpt(const std::string& msg,
                                 "发来一条消息";
             }
         }
-        pushOpt(rsp + "\n");
+        std::string prompt;
+        {
+            std::lock_guard<std::mutex> lk(g_ui_mutex);
+            prompt = g_prompt;
+        }
+        pushOpt(CYAN + std::string("\033[A\033[K") + rsp + std::string("\n") +
+                RESET + prompt);
         return;
     }
     pushRsp(js);

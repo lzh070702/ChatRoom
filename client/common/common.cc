@@ -24,12 +24,13 @@ std::queue<json> g_rsp_que;
 std::condition_variable g_rsp_cv;
 
 std::mutex g_ui_mutex;
+std::string g_prompt;
 std::string g_prefix;
 json g_user;
 
 std::mutex g_chat_mtx;
 int g_chat_type = -1;  // -1 无会话, 0 私聊, 1 群聊
-int g_chat_id = -1;    // 私聊为对方好友 id, 群聊为群 id
+int g_chat_id = -1;
 
 void printOpt() {
     auto msgs = popOpt();
@@ -54,7 +55,7 @@ void printOpt() {
 void pushOpt(const std::string& smsg) {
     {
         std::lock_guard<std::mutex> lk(g_opt_mtx);
-        g_opt_que.push(smsg);
+        g_opt_que.push(smsg + "\n");
     }
     uint64_t one = 1;
     write(g_opt_efd, &one, sizeof(one));
@@ -108,6 +109,12 @@ json popRsp() {
     return js;
 }
 
+void setPrompt(const std::string& prompt) {
+    pushOpt(prompt);
+    std::lock_guard<std::mutex> lk(g_ui_mutex);
+    g_prompt = prompt;
+}
+
 void setPrefix(const std::string& prefix) {
     std::lock_guard<std::mutex> lk(g_ui_mutex);
     g_prefix = prefix;
@@ -115,17 +122,16 @@ void setPrefix(const std::string& prefix) {
 
 void showTip(const std::string& msg) {
     system("clear");
-    pushOpt(msg + "\n");
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+    pushOpt(msg);
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
 }
 
 bool confirm(const std::string& msg) {
-    system("clear");
-    pushOpt("======================\n");
-    pushOpt(msg + "\n");
-    pushOpt("1. 确认    2. 取消\n");
-    pushOpt("======================\n");
-    pushOpt("请选择:\n");
+    pushOpt("======================");
+    pushOpt(msg);
+    pushOpt("1. 确认    2. 取消");
+    pushOpt("======================");
+    setPrompt("请选择:");
     setPrefix("选择:");
     while (g_running) {
         std::string input = popIpt();
@@ -134,7 +140,7 @@ bool confirm(const std::string& msg) {
         } else if (input == "2") {
             return false;
         }
-        pushOpt("\033[A\033[K请选择:\n");
+        pushOpt("\033[A\033[K请选择:");
     }
     return false;
 }

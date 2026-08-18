@@ -10,14 +10,14 @@
 void groupPage(TcpClient& client) {
     while (g_running) {
         system("clear");
-        pushOpt("──────── 群聊 ────────\n");
-        pushOpt("======================\n");
-        pushOpt("1. 我的群聊\n");
-        pushOpt("2. 创建群聊\n");
-        pushOpt("3. 申请入群\n");
-        pushOpt("4. 返回\n");
-        pushOpt("======================\n");
-        pushOpt("请选择:\n");
+        pushOpt("──────── 群聊 ────────");
+        pushOpt("======================");
+        pushOpt("1. 我的群聊");
+        pushOpt("2. 创建群聊");
+        pushOpt("3. 申请入群");
+        pushOpt("4. 返回");
+        pushOpt("======================");
+        setPrompt("请选择:");
         setPrefix("选择:");
         std::string input = popIpt();
         if (input == "1") {
@@ -42,25 +42,20 @@ void groupList(TcpClient& client) {
         if (!g_running) {
             return;
         }
-        if (rsp["code"] != 1) {
-            showTip(std::string(rsp["msg"]));
-            return;
-        }
-        pushOpt("────── 我的群聊 ──────\n");
-        pushOpt("======================\n");
-        pushOpt("0. 返回\n");
+        pushOpt("────── 我的群聊 ──────");
+        pushOpt("======================");
+        pushOpt("0. 返回");
         int cnt = 0;
         for (auto& g : rsp["msg"]) {
             cnt++;
-            pushOpt(std::to_string(cnt) + ". " + std::string(g["name"]) +
-                    " (id:" + std::to_string((int)g["id"]) + ")\n");
+            pushOpt(std::to_string(cnt) + ". " + std::string(g["name"]));
         }
         if (cnt == 0) {
-            pushOpt("（暂无群聊）\n");
+            pushOpt("（暂无群聊）");
         }
-        pushOpt("======================\n");
-        pushOpt("请输入序号或 0 :\n");
-        setPrefix("群序号:");
+        pushOpt("======================");
+        setPrompt("请选择群聊:");
+        setPrefix("群聊:");
         std::string input = popIpt();
         if (input == "0") {
             return;
@@ -75,46 +70,40 @@ void groupList(TcpClient& client) {
 void createGroup(TcpClient& client) {
     while (g_running) {
         system("clear");
-        pushOpt("────── 创建群聊 ──────\n");
-        pushOpt("======================\n");
-        pushOpt("请输入群名称:\n");
+        pushOpt("────── 创建群聊 ──────");
+        pushOpt("======================");
+        setPrompt("请输入群名称:");
         setPrefix("群名称:");
         std::string name = popIpt();
         if (name.empty()) {
             continue;
         }
-        pushOpt("======================\n");
-        pushOpt("1. 创建    2. 返回\n");
-        pushOpt("======================\n");
-        pushOpt("请选择:\n");
-        setPrefix("选择:");
-        while (g_running) {
-            std::string input = popIpt();
-            if (input == "1") {
-                json req;
-                req["type"] = 16;
-                req["name"] = name;
-                client.sendData(req.dump());
-                json rsp = popRsp();
-                if (!g_running) {
-                    return;
-                }
-                showTip(std::string(rsp["msg"]));
-                return;
-            } else if (input == "2") {
-                return;
-            }
-            pushOpt("\033[A\033[K请选择:\n");
+        if (!confirm("确定创建群聊吗")) {
+            return;
         }
+        json req;
+        req["type"] = 16;
+        req["name"] = name;
+        client.sendData(req.dump());
+        json rsp = popRsp();
+        if (!g_running) {
+            return;
+        }
+        if (rsp["code"] != 1) {
+            showTip(RED + std::string(rsp["msg"]) + RESET);
+        } else {
+            showTip(GREEN + std::string(rsp["msg"]) + RESET);
+        }
+        return;
     }
 }
 
 void applyGroup(TcpClient& client) {
     while (g_running) {
         system("clear");
-        pushOpt("────── 申请入群 ──────\n");
-        pushOpt("======================\n");
-        pushOpt("请输入群 id:\n");
+        pushOpt("────── 申请入群 ──────");
+        pushOpt("======================");
+        setPrompt("请输入群 id:");
         setPrefix("群id:");
         std::string gid = popIpt();
         if (gid.empty()) {
@@ -130,8 +119,201 @@ void applyGroup(TcpClient& client) {
         if (!g_running) {
             return;
         }
-        showTip(std::string(rsp["msg"]));
+        if (rsp["code"] != 1) {
+            showTip(RED + std::string(rsp["msg"]) + RESET);
+        } else {
+            showTip(GREEN + std::string(rsp["msg"]) + RESET);
+        }
         return;
+    }
+}
+
+static void inviteToGroup(TcpClient& client, int group_id) {
+    json freq;
+    freq["type"] = 8;
+    client.sendData(freq.dump());
+    json frsp = popRsp();
+    if (!g_running) {
+        return;
+    }
+    std::vector<int> friend_ids;
+    system("clear");
+    pushOpt("──── 邀请好友入群 ────");
+    pushOpt("======================");
+    pushOpt("0. 返回");
+    int cnt = 0;
+    for (auto& f : frsp["friends"]) {
+        if (f["status"] >= 2) {
+            cnt++;
+            friend_ids.push_back(f["id"]);
+            pushOpt(std::to_string(cnt) + ". " + std::string(f["name"]));
+        }
+    }
+    if (cnt == 0) {
+        pushOpt("（暂无好友可邀请）");
+    }
+    pushOpt("======================");
+    setPrompt("请选择好友:");
+    setPrefix("好友:");
+    std::string sel = popIpt();
+    if (sel == "0") {
+        return;
+    }
+    int idx = atoi(sel.c_str());
+    if (idx < 1 || idx > cnt) {
+        showTip(RED + std::string("不存在该好友") + RESET);
+        return;
+    }
+    json req;
+    req["type"] = 17;
+    req["group_id"] = group_id;
+    req["id"] = friend_ids[idx - 1];
+    client.sendData(req.dump());
+    json rsp = popRsp();
+    if (!g_running) {
+        return;
+    }
+    if (rsp["code"] != 1) {
+        showTip(RED + std::string(rsp["msg"]) + RESET);
+    } else {
+        showTip(GREEN + std::string(rsp["msg"]) + RESET);
+    }
+}
+
+static void memberOps(TcpClient& client, int group_id) {
+    while (g_running) {
+        json req;
+        req["type"] = 20;
+        req["group_id"] = group_id;
+        client.sendData(req.dump());
+        json rsp = popRsp();
+        if (!g_running) {
+            return;
+        }
+        if (rsp["code"] != 1) {
+            showTip(RED + std::string(rsp["msg"]) + RESET);
+            return;
+        }
+        system("clear");
+        pushOpt("───── 群成员操作 ─────");
+        pushOpt("======================");
+        pushOpt("0. 返回");
+        int cnt = 0;
+        for (auto& m : rsp["members"]) {
+            cnt++;
+            int role = m["role"];
+            std::string role_name = (role == 3)   ? "群主"
+                                    : (role == 2) ? "管理员"
+                                    : (role == 1) ? "成员"
+                                                  : "待审核";
+            pushOpt(std::to_string(cnt) + ". " + std::string(m["name"]) + "-" +
+                    std::string(m["email"]) + role_name);
+        }
+        pushOpt("======================");
+        setPrompt("请选择成员:");
+        setPrefix("成员:");
+        std::string input = popIpt();
+        if (input == "0") {
+            return;
+        }
+        int idx = atoi(input.c_str());
+        if (idx < 1 || idx > cnt) {
+            continue;
+        }
+        json target = rsp["members"][idx - 1];
+        int target_role = target["role"];
+        int target_id = target["id"];
+        std::string target_name = target["name"];
+        if (target_role == 3) {
+            showTip(RED + std::string("不可操作群主") + RESET);
+            continue;
+        }
+        system("clear");
+        pushOpt("────── 操作成员 ──────");
+        pushOpt("======================");
+        pushOpt(target_name);
+        pushOpt("======================");
+        if (target_role == 0) {
+            pushOpt("1. 同意");
+            pushOpt("2. 拒绝");
+            pushOpt("3. 返回");
+            pushOpt("======================");
+            setPrompt("请选择:");
+            setPrefix("选择:");
+            std::string choice = popIpt();
+            if (!g_running) {
+                return;
+            }
+            if (choice != "1" && choice != "2") {
+                continue;
+            }
+            req["type"] = 19;
+            req["group_id"] = group_id;
+            req["id"] = target_id;
+            req["agree"] = (choice == "1") ? 1 : 0;
+            client.sendData(req.dump());
+            json rsp2 = popRsp();
+            if (!g_running) {
+                return;
+            }
+            if (rsp2["code"] != 1) {
+                showTip(RED + std::string(rsp2["msg"]) + RESET);
+            } else {
+                showTip(GREEN + std::string(rsp2["msg"]) + RESET);
+            }
+            continue;
+        }
+        pushOpt("1. 踢出群聊");
+        if (target_role == 1) {
+            pushOpt("2. 设置管理员");
+        } else {
+            pushOpt("2. 撤销管理员");
+        }
+        pushOpt("3. 返回");
+        pushOpt("======================");
+        setPrompt("请选择:");
+        setPrefix("选择:");
+        std::string choice = popIpt();
+        if (!g_running) {
+            return;
+        }
+        if (choice == "1") {
+            if (!confirm(YELLOW + std::string("确定要踢出 ") + target_name +
+                         std::string(" 吗？") + RESET)) {
+                continue;
+            }
+            req["type"] = 22;
+            req["group_id"] = group_id;
+            req["id"] = target_id;
+            client.sendData(req.dump());
+            json rsp2 = popRsp();
+            if (!g_running) {
+                return;
+            }
+            if (rsp2["code"] != 1) {
+                showTip(RED + std::string(rsp2["msg"]) + RESET);
+            } else {
+                showTip(GREEN + std::string(rsp2["msg"]) + RESET);
+            }
+            continue;
+        } else if (choice == "2") {
+            req["type"] = 21;
+            req["group_id"] = group_id;
+            req["id"] = target_id;
+            req["admin"] = (target_role == 1) ? 1 : 0;
+            client.sendData(req.dump());
+            json rsp2 = popRsp();
+            if (!g_running) {
+                return;
+            }
+            if (rsp2["code"] != 1) {
+                showTip(RED + std::string(rsp2["msg"]) + RESET);
+            } else {
+                showTip(GREEN + std::string(rsp2["msg"]) + RESET);
+            }
+            continue;
+        }
+        continue;
     }
 }
 
@@ -149,7 +331,7 @@ void groupMenu(TcpClient& client, const json& g) {
             return;
         }
         if (rsp["code"] != 1) {
-            showTip(std::string(rsp["msg"]));
+            showTip(RED + std::string(rsp["msg"]) + RESET);
             return;
         }
         int my_role = -1;
@@ -159,39 +341,18 @@ void groupMenu(TcpClient& client, const json& g) {
             }
         }
         system("clear");
-        pushOpt("────── 群操作 ──────\n");
-        pushOpt("======================\n");
-        pushOpt(group_name + " (id:" + std::to_string(group_id) + ")\n");
-        pushOpt("======================\n");
-        for (auto& m : rsp["members"]) {
-            int role = m["role"];
-            std::string role_name = (role == 3)   ? "群主"
-                                    : (role == 2) ? "管理员"
-                                    : (role == 1) ? "成员"
-                                                  : "待审核";
-            std::string online = (m["state"] == 1) ? "在线" : "离线";
-            pushOpt(std::to_string((int)m["id"]) + " " +
-                    std::string(m["name"]) + " " + role_name + " " + online +
-                    "\n");
-        }
-        pushOpt("======================\n");
-        pushOpt("1. 进入群聊\n");
-        pushOpt("2. 查看聊天记录\n");
-        if (my_role >= 2) {
-            pushOpt("3. 邀请好友入群\n");
-            pushOpt("4. 处理入群申请\n");
-            pushOpt("5. 踢出成员\n");
-        }
-        if (my_role == 3) {
-            pushOpt("6. 设置/撤销管理员\n");
-            pushOpt("7. 解散群\n");
-        }
-        if (my_role != 3) {
-            pushOpt("8. 退出群聊\n");
-        }
-        pushOpt("0. 返回\n");
-        pushOpt("======================\n");
-        pushOpt("请选择:\n");
+        pushOpt("─────── 群操作 ───────");
+        pushOpt("======================");
+        pushOpt(group_name + " (id:" + std::to_string(group_id) + ")");
+        pushOpt("======================");
+        pushOpt("1. 进入群聊");
+        pushOpt("2. 查看聊天记录");
+        pushOpt("3. 邀请好友进群");
+        pushOpt("4. 群成员操作");
+        pushOpt("5. 解散群");
+        pushOpt("6. 返回");
+        pushOpt("======================");
+        setPrompt("请选择:");
         setPrefix("选择:");
         std::string input = popIpt();
         if (!g_running) {
@@ -203,163 +364,24 @@ void groupMenu(TcpClient& client, const json& g) {
         } else if (input == "2") {
             viewGroupHistory(client, g);
             continue;
-        } else if (input == "0") {
-            return;
-        }
-
-        if (input == "3" && my_role >= 2) {
-            json freq;
-            freq["type"] = 8;
-            client.sendData(freq.dump());
-            json frsp = popRsp();
-            if (!g_running) {
-                return;
-            }
-            if (frsp["code"] != 1) {
-                showTip(std::string(frsp["msg"]));
+        } else if (input == "3") {
+            if (my_role < 2) {
+                showTip(RED + std::string("无权限") + RESET);
                 continue;
             }
-            std::vector<int> friend_ids;
-            system("clear");
-            pushOpt("──── 邀请好友入群 ────\n");
-            pushOpt("======================\n");
-            pushOpt("0. 返回\n");
-            int cnt = 0;
-            for (auto& f : frsp["friends"]) {
-                if (f["status"] == 2) {
-                    cnt++;
-                    friend_ids.push_back(f["id"]);
-                    pushOpt(std::to_string(cnt) + ". " +
-                            std::string(f["name"]) + "\n");
-                }
-            }
-            if (cnt == 0) {
-                pushOpt("（暂无好友可邀请）\n");
-            }
-            pushOpt("======================\n");
-            pushOpt("请输入序号或 0 :\n");
-            setPrefix("好友序号:");
-            std::string sel = popIpt();
-            if (sel == "0") {
-                continue;
-            }
-            int idx = atoi(sel.c_str());
-            if (idx < 1 || idx > cnt) {
-                continue;
-            }
-            req["type"] = 17;
-            req["group_id"] = group_id;
-            req["id"] = friend_ids[idx - 1];
-            client.sendData(req.dump());
-            json rsp2 = popRsp();
-            if (!g_running) {
-                return;
-            }
-            showTip(std::string(rsp2["msg"]));
+            inviteToGroup(client, group_id);
             continue;
-        }
-
-        if (input == "4" && my_role >= 2) {
-            std::vector<int> applicants;
-            system("clear");
-            pushOpt("──── 处理入群申请 ────\n");
-            pushOpt("======================\n");
-            pushOpt("0. 返回\n");
-            int cnt = 0;
-            for (auto& m : rsp["members"]) {
-                if (m["role"] == 0) {
-                    cnt++;
-                    applicants.push_back(m["id"]);
-                    pushOpt(std::to_string(cnt) + ". " +
-                            std::string(m["name"]) + " (" +
-                            std::string(m["email"]) + ")\n");
-                }
-            }
-            if (cnt == 0) {
-                pushOpt("（暂无入群申请）\n");
-            }
-            pushOpt("======================\n");
-            pushOpt("请输入序号或 0 :\n");
-            setPrefix("申请序号:");
-            std::string sel = popIpt();
-            if (sel == "0") {
-                continue;
-            }
-            int idx = atoi(sel.c_str());
-            if (idx < 1 || idx > cnt) {
-                continue;
-            }
-            pushOpt("1. 同意    2. 拒绝\n");
-            setPrefix("选择:");
-            std::string agree = popIpt();
-            if (agree != "1" && agree != "2") {
-                continue;
-            }
-            req["type"] = 19;
-            req["group_id"] = group_id;
-            req["id"] = applicants[idx - 1];
-            req["agree"] = (agree == "1") ? 1 : 0;
-            client.sendData(req.dump());
-            json rsp2 = popRsp();
-            if (!g_running) {
-                return;
-            }
-            showTip(std::string(rsp2["msg"]));
+        } else if (input == "4") {
+            memberOps(client, group_id);
             continue;
-        }
-
-        if (input == "5" && my_role >= 2) {
-            pushOpt("请输入要踢出的成员 id:\n");
-            setPrefix("成员id:");
-            std::string sel = popIpt();
-            if (sel.empty()) {
+        } else if (input == "5") {
+            if (my_role != 3) {
+                showTip(RED + std::string("无权限") + RESET);
                 continue;
             }
-            int target = atoi(sel.c_str());
-            if (!confirm("确定要踢出该成员吗？")) {
-                continue;
-            }
-            req["type"] = 22;
-            req["group_id"] = group_id;
-            req["id"] = target;
-            client.sendData(req.dump());
-            json rsp2 = popRsp();
-            if (!g_running) {
-                return;
-            }
-            showTip(std::string(rsp2["msg"]));
-            continue;
-        }
-
-        if (input == "6" && my_role == 3) {
-            pushOpt("请输入成员 id:\n");
-            setPrefix("成员id:");
-            std::string sel = popIpt();
-            if (sel.empty()) {
-                continue;
-            }
-            int target = atoi(sel.c_str());
-            pushOpt("1. 设为管理员    2. 撤销管理员\n");
-            setPrefix("选择:");
-            std::string choice = popIpt();
-            if (choice != "1" && choice != "2") {
-                continue;
-            }
-            req["type"] = 21;
-            req["group_id"] = group_id;
-            req["id"] = target;
-            req["admin"] = (choice == "1") ? 1 : 0;
-            client.sendData(req.dump());
-            json rsp2 = popRsp();
-            if (!g_running) {
-                return;
-            }
-            showTip(std::string(rsp2["msg"]));
-            continue;
-        }
-
-        if (input == "7" && my_role == 3) {
-            if (!confirm("确定要解散该群吗？此操作不可恢复！")) {
+            if (!confirm(YELLOW +
+                         std::string("确定要解散该群吗？此操作不可恢复！") +
+                         RESET)) {
                 continue;
             }
             req["type"] = 24;
@@ -369,32 +391,22 @@ void groupMenu(TcpClient& client, const json& g) {
             if (!g_running) {
                 return;
             }
-            showTip(std::string(rsp2["msg"]));
+            if (rsp2["code"] != 1) {
+                showTip(RED + std::string(rsp2["msg"]) + RESET);
+            } else {
+                showTip(GREEN + std::string(rsp2["msg"]) + RESET);
+            }
+            return;
+        } else if (input == "6") {
             return;
         }
-
-        if (input == "8" && my_role != 3) {
-            if (!confirm("确定要退出该群吗？")) {
-                continue;
-            }
-            req["type"] = 23;
-            req["group_id"] = group_id;
-            client.sendData(req.dump());
-            json rsp2 = popRsp();
-            if (!g_running) {
-                return;
-            }
-            showTip(std::string(rsp2["msg"]));
-            return;
-        }
-        pushOpt("\033[A\033[K请选择:\n");
     }
 }
 
 void uploadGroupFile(TcpClient& client, int group_id, const std::string& path) {
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs) {
-        pushOpt("文件不存在: " + path + "\n");
+        pushOpt(RED + std::string("文件不存在: ") + path + RESET);
         return;
     }
     std::string data((std::istreambuf_iterator<char>(ifs)),
@@ -409,11 +421,11 @@ void uploadGroupFile(TcpClient& client, int group_id, const std::string& path) {
     client.sendData(req.dump());
     json rsp = popRsp();
     if (rsp["code"] != 1) {
-        pushOpt(std::string(rsp["msg"]) + "\n");
+        pushOpt(RED + std::string(rsp["msg"]) + RESET);
     } else {
-        pushOpt("文件已发送\n");
+        pushOpt(GREEN + std::string("文件已发送") + RESET);
     }
-    pushOpt("======================\n");
+    pushOpt("======================");
 }
 
 void groupChatPage(TcpClient& client, const json& g) {
@@ -421,11 +433,11 @@ void groupChatPage(TcpClient& client, const json& g) {
     std::string group_name = g["name"];
     setChatSession(1, group_id);
     system("clear");
-    pushOpt("群聊: " + group_name + "\n");
-    pushOpt("（输入消息，/q 退出，put <路径> 发文件）\n");
-    pushOpt("======================\n");
+    pushOpt("群聊: " + group_name);
+    pushOpt("（输入消息，/q 退出）");
+    pushOpt("======================");
     showGroupHistory(client, g, 0);
-    pushOpt("======================\n");
+    setPrompt("======================");
     setPrefix("我:");
     while (g_running) {
         std::string input = popIpt();
@@ -451,9 +463,9 @@ void groupChatPage(TcpClient& client, const json& g) {
         client.sendData(req.dump());
         json rsp = popRsp();
         if (rsp["code"] != 1) {
-            pushOpt(std::string(rsp["msg"]) + "\n");
+            pushOpt(RED + std::string(rsp["msg"]) + RESET);
         }
-        pushOpt("======================\n");
+        pushOpt("======================");
     }
     setChatSession(-1, -1);
 }
@@ -471,11 +483,11 @@ void showGroupHistory(TcpClient& client, const json& g, int scope) {
         return;
     }
     if (rsp["code"] != 1) {
-        showTip(std::string(rsp["msg"]));
+        showTip(RED + std::string(rsp["msg"]) + RESET);
         return;
     }
     if (rsp["msg"].empty()) {
-        pushOpt("（暂无聊天记录）\n");
+        pushOpt("（暂无聊天记录）");
     }
     for (auto& m : rsp["msg"]) {
         int sender_id = m["sender_id"];
@@ -486,17 +498,17 @@ void showGroupHistory(TcpClient& client, const json& g, int scope) {
             content = "[文件] " + content;
         }
         std::string who = (sender_id == my_id) ? "我" : sender_name;
-        pushOpt(who + ": " + content + "\n");
+        pushOpt(who + ": " + content);
     }
 }
 
 void viewGroupHistory(TcpClient& client, const json& g) {
     system("clear");
-    pushOpt("======================\n");
+    pushOpt("======================");
     showGroupHistory(client, g, 1);
-    pushOpt("======================\n");
-    pushOpt("聊天记录: " + std::string(g["name"]) + "\n");
-    pushOpt("（输入任意内容返回）\n");
+    pushOpt("======================");
+    pushOpt("聊天记录: " + std::string(g["name"]));
+    setPrompt("（输入任意内容返回）");
     setPrefix("返回:");
     popIpt();
 }

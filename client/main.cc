@@ -21,7 +21,7 @@ int main(int argc, char* argv[]) {
     int port = (argc > 2) ? stoi(argv[2]) : 8000;
     TcpClient client;
     if (!client.connectServer(host, port)) {
-        cerr << "连接失败" << endl;
+        cerr << RED << "连接失败" << RESET << endl;
         return 1;
     }
     g_opt_efd = eventfd(0, EFD_NONBLOCK);

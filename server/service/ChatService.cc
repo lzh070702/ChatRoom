@@ -191,28 +191,24 @@ void ChatService::signIn(std::shared_ptr<Connection> conn, const json& js) {
     response["id"] = user.getId();
     response["name"] = user.getName();
     response["email"] = user.getEmail();
+    json offline = json::array();
+    std::string data;
+    auto pop_offline = [&](const std::string& key) {
+        while (m_redis.rpop(key, data)) {
+            try {
+                offline.push_back(json::parse(data));
+            } catch (...) {
+            }
+        }
+    };
+    pop_offline("offline_request:" + std::to_string(user.getId()));
+    pop_offline("offline_group_request:" + std::to_string(user.getId()));
+    pop_offline("offline_msg:" + std::to_string(user.getId()));
+    pop_offline("offline_group_msg:" + std::to_string(user.getId()));
+    response["offline"] = offline;
     conn->getReactor()->handleWrite(conn, response.dump());
     LOG(INFO) << "SignIn success uid=" << user.getId()
               << " email=" << user.getEmail();
-    std::string data;
-    std::string request_key = "offline_request:" + std::to_string(user.getId());
-    while (m_redis.rpop(request_key, data)) {
-        conn->getReactor()->handleWrite(conn, data);
-    }
-    std::string group_request_key =
-        "offline_group_request:" + std::to_string(user.getId());
-    while (m_redis.rpop(group_request_key, data)) {
-        conn->getReactor()->handleWrite(conn, data);
-    }
-    std::string msg_key = "offline_msg:" + std::to_string(user.getId());
-    while (m_redis.rpop(msg_key, data)) {
-        conn->getReactor()->handleWrite(conn, data);
-    }
-    std::string group_msg_key =
-        "offline_group_msg:" + std::to_string(user.getId());
-    while (m_redis.rpop(group_msg_key, data)) {
-        conn->getReactor()->handleWrite(conn, data);
-    }
 }
 
 void ChatService::sendCode(std::shared_ptr<Connection> conn, const json& js) {
@@ -286,27 +282,22 @@ void ChatService::codeLogin(std::shared_ptr<Connection> conn, const json& js) {
         response["id"] = user.getId();
         response["name"] = user.getName();
         response["email"] = user.getEmail();
-        conn->getReactor()->handleWrite(conn, response.dump());
+        json offline = json::array();
         std::string data;
-        std::string request_key =
-            "offline_request:" + std::to_string(user.getId());
-        while (m_redis.rpop(request_key, data)) {
-            conn->getReactor()->handleWrite(conn, data);
-        }
-        std::string group_request_key =
-            "offline_group_request:" + std::to_string(user.getId());
-        while (m_redis.rpop(group_request_key, data)) {
-            conn->getReactor()->handleWrite(conn, data);
-        }
-        std::string msg_key = "offline_msg:" + std::to_string(user.getId());
-        while (m_redis.rpop(msg_key, data)) {
-            conn->getReactor()->handleWrite(conn, data);
-        }
-        std::string group_msg_key =
-            "offline_group_msg:" + std::to_string(user.getId());
-        while (m_redis.rpop(group_msg_key, data)) {
-            conn->getReactor()->handleWrite(conn, data);
-        }
+        auto pop_offline = [&](const std::string& key) {
+            while (m_redis.rpop(key, data)) {
+                try {
+                    offline.push_back(json::parse(data));
+                } catch (...) {
+                }
+            }
+        };
+        pop_offline("offline_request:" + std::to_string(user.getId()));
+        pop_offline("offline_group_request:" + std::to_string(user.getId()));
+        pop_offline("offline_msg:" + std::to_string(user.getId()));
+        pop_offline("offline_group_msg:" + std::to_string(user.getId()));
+        response["offline"] = offline;
+        conn->getReactor()->handleWrite(conn, response.dump());
         LOG(INFO) << "CodeLogin success uid=" << user.getId()
                   << " email=" << email;
     } else {
@@ -649,7 +640,7 @@ void ChatService::inviteToGroup(std::shared_ptr<Connection> conn,
             conn, R"({"type":17,"code":0,"msg":"无权限"})");
         return;
     }
-    if (m_friend_model.isFriend(user_id, friend_id) != 2) {
+    if (m_friend_model.isFriend(user_id, friend_id) < 2) {
         conn->getReactor()->handleWrite(
             conn, R"({"type":17,"code":0,"msg":"不是好友"})");
         return;
@@ -814,7 +805,6 @@ void ChatService::queryMembers(std::shared_ptr<Connection> conn,
         info["id"] = user.getId();
         info["name"] = user.getName();
         info["email"] = user.getEmail();
-        info["state"] = user.getState();
         info["role"] = role;
         response["members"].push_back(info);
     }
@@ -992,8 +982,8 @@ void ChatService::groupChat(std::shared_ptr<Connection> conn, const json& js) {
                           response.dump());
         }
     }
-    conn->getReactor()->handleWrite(
-        conn, R"({"type":25,"code":1,"msg":"发送成功"})");
+    conn->getReactor()->handleWrite(conn,
+                                    R"({"type":25,"code":1,"msg":"发送成功"})");
 }
 
 void ChatService::queryGroupHistory(std::shared_ptr<Connection> conn,
@@ -1052,8 +1042,7 @@ void ChatService::saveFile(int message_id,
     if (name.empty() || name == "." || name == "..") {
         return;
     }
-    std::string path =
-        "./files/" + std::to_string(message_id) + "_" + name;
+    std::string path = "./files/" + std::to_string(message_id) + "_" + name;
     std::ofstream ofs(path, std::ios::binary);
     std::string decoded = base64Decode(file_data);
     ofs.write(decoded.data(), decoded.size());
