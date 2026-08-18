@@ -13,6 +13,8 @@ class MySQL {
     int updateAndGetId(const std::string& sql);
     bool queryAll(const std::string& sql,
                   std::vector<std::vector<std::string>>& rows);
+    std::string escape(const std::string& str);
+    std::string escape(MYSQL* conn, const std::string& str);
     MYSQL* transaction();
     bool commit(MYSQL* conn);
     bool rollback(MYSQL* conn);

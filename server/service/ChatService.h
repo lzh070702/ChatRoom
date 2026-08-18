@@ -65,6 +65,7 @@ class ChatService {
     void saveFile(int message_id,
                   const std::string& file_name,
                   const std::string& file_data);
+    std::string basename(const std::string& path);
     std::string sha256(const std::string& input);
 
    private:

@@ -22,9 +22,8 @@ bool MySQLPool::init(int size,
             return false;
         }
         mysql_set_character_set(conn, "utf8");
-        if (!mysql_real_connect(conn, ip.c_str(), user.c_str(),
-                                passwd.c_str(), db.c_str(), port, nullptr,
-                                0)) {
+        if (!mysql_real_connect(conn, ip.c_str(), user.c_str(), passwd.c_str(),
+                                db.c_str(), port, nullptr, 0)) {
             mysql_close(conn);
             return false;
         }

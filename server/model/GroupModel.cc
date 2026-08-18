@@ -9,19 +9,16 @@ bool GroupModel::createGroup(std::string name, int owner_id, int& group_id) {
     if ((conn = m_mysql.transaction()) == nullptr) {
         return false;
     }
-    char sql[1024] = {0};
-    snprintf(sql, sizeof(sql),
-             "INSERT INTO group_info(name, owner_id) "
-             "VALUES('%s',%d);",
-             name.c_str(), owner_id);
-
-    if (mysql_query(conn, sql) == 0) {
+    std::string sql = "INSERT INTO group_info(name, owner_id) VALUES('" +
+                      m_mysql.escape(conn, name) + "'," +
+                      std::to_string(owner_id) + ");";
+    if (mysql_query(conn, sql.c_str()) == 0) {
         group_id = static_cast<int>(mysql_insert_id(conn));
-        snprintf(sql, sizeof(sql),
-                 "INSERT INTO group_user(group_id,user_id,role)"
-                 "VALUES(%d, %d, 3);",
-                 group_id, owner_id);
-        if (mysql_query(conn, sql) == 0 && m_mysql.commit(conn)) {
+        std::string sql2 =
+            "INSERT INTO group_user(group_id,user_id,role) VALUES(" +
+            std::to_string(group_id) + ", " + std::to_string(owner_id) +
+            ", 3);";
+        if (mysql_query(conn, sql2.c_str()) == 0 && m_mysql.commit(conn)) {
             return true;
         }
     }
@@ -46,7 +43,7 @@ std::vector<json> GroupModel::queryGroups(int user_id) {
     }
     for (auto& row : rows) {
         json group;
-        group["id"] = row[0];
+        group["id"] = std::stoi(row[0]);
         group["name"] = row[1];
         groups.emplace_back(group);
     }
@@ -82,8 +79,7 @@ bool GroupModel::groupExist(int group_id) {
 
 std::string GroupModel::getGroupName(int group_id) {
     char sql[1024] = {0};
-    snprintf(sql, sizeof(sql),
-             "SELECT name FROM group_info WHERE id = %d;",
+    snprintf(sql, sizeof(sql), "SELECT name FROM group_info WHERE id = %d;",
              group_id);
     std::vector<std::vector<std::string>> rows;
     if (!m_mysql.queryAll(sql, rows) || rows.empty()) {
@@ -213,11 +209,11 @@ bool GroupModel::removeFromAll(int user_id) {
              "WHERE g.owner_id = %d;",
              user_id);
     m_mysql.update(sql);
-    snprintf(sql, sizeof(sql),
-             "DELETE FROM group_info WHERE owner_id = %d;", user_id);
+    snprintf(sql, sizeof(sql), "DELETE FROM group_info WHERE owner_id = %d;",
+             user_id);
     m_mysql.update(sql);
     // 删除该用户在其他群中的成员记录
-    snprintf(sql, sizeof(sql),
-             "DELETE FROM group_user WHERE user_id = %d;", user_id);
+    snprintf(sql, sizeof(sql), "DELETE FROM group_user WHERE user_id = %d;",
+             user_id);
     return m_mysql.update(sql);
 }

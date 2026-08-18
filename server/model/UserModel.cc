@@ -9,12 +9,12 @@ UserModel::UserModel(MySQLPool* pool) {
 }
 
 bool UserModel::insert(User& user) {
-    char sql[1024] = {0};
-    snprintf(sql, sizeof(sql),
-             "INSERT INTO user(name, email, password, state) "
-             "VALUES('%s','%s','%s',%d);",
-             user.getName().c_str(), user.getEmail().c_str(),
-             user.getPassword().c_str(), user.getState());
+    std::string sql =
+        "INSERT INTO user(name, email, password, state) VALUES('" +
+        m_mysql.escape(user.getName()) + "','" +
+        m_mysql.escape(user.getEmail()) + "','" +
+        m_mysql.escape(user.getPassword()) + "'," +
+        std::to_string(user.getState()) + ");";
     return m_mysql.update(sql);
 }
 
@@ -38,11 +38,10 @@ bool UserModel::queryById(int id, User& user) {
 }
 
 bool UserModel::queryByEmail(const std::string& email, User& user) {
-    char sql[1024] = {0};
-    snprintf(sql, sizeof(sql),
-             "SELECT id, name, email, password, state FROM user "
-             "WHERE email = '%s';",
-             email.c_str());
+    std::string sql =
+        "SELECT id, name, email, password, state FROM user "
+        "WHERE email = '" +
+        m_mysql.escape(email) + "';";
     std::vector<std::vector<std::string>> rows;
     if (!m_mysql.queryAll(sql, rows) || rows.empty()) {
         return false;
@@ -70,10 +69,9 @@ bool UserModel::resetState() {
 }
 
 bool UserModel::updatePassword(int id, const std::string& password) {
-    char sql[1024] = {0};
-    snprintf(sql, sizeof(sql),
-             "UPDATE user SET password = '%s' WHERE id = %d;",
-             password.c_str(), id);
+    std::string sql = "UPDATE user SET password = '" +
+                      m_mysql.escape(password) +
+                      "' WHERE id = " + std::to_string(id) + ";";
     return m_mysql.update(sql);
 }
 

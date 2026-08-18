@@ -41,7 +41,10 @@ ChatService::ChatService()
       m_friend_model(&m_mysql_pool),
       m_group_model(&m_mysql_pool),
       m_message_model(&m_mysql_pool) {
-    m_mysql_pool.init(4, "chatserver", "123456", "chatroom", "127.0.0.1");
+    if (!m_mysql_pool.init(4, "chatserver", "123456", "chatroom",
+                           "127.0.0.1")) {
+        LOG(FATAL) << "MySQL pool init failed";
+    }
     m_handlers[0] = [this](std::shared_ptr<Connection> c, const json& j) {
         heartbeat(c, j);
     };
@@ -955,12 +958,15 @@ void ChatService::groupChat(std::shared_ptr<Connection> conn, const json& js) {
         content = std::to_string(msg_id) + "_" + content;
         m_message_model.updateContent(msg_id, content);
     }
+    User sender;
+    m_user_model.queryById(user_id, sender);
     auto members = m_group_model.queryMembers(group_id);
     json response;
     response["type"] = 25;
     response["code"] = 2;
     response["group_id"] = group_id;
     response["sender_id"] = user_id;
+    response["sender_name"] = sender.getName();
     response["group_name"] = m_group_model.getGroupName(group_id);
     response["msg"] = content;
     response["msg_type"] = js["msg_type"];
@@ -986,6 +992,8 @@ void ChatService::groupChat(std::shared_ptr<Connection> conn, const json& js) {
                           response.dump());
         }
     }
+    conn->getReactor()->handleWrite(
+        conn, R"({"type":25,"code":1,"msg":"发送成功"})");
 }
 
 void ChatService::queryGroupHistory(std::shared_ptr<Connection> conn,
@@ -1008,7 +1016,15 @@ void ChatService::queryGroupHistory(std::shared_ptr<Connection> conn,
 }
 
 void ChatService::pullFile(std::shared_ptr<Connection> conn, const json& js) {
-    std::string file_name = js["msg"];
+    std::string file_name = basename(js["msg"]);
+    if (file_name.empty() || file_name == "." || file_name == "..") {
+        json response;
+        response["type"] = 27;
+        response["code"] = 0;
+        response["msg"] = "文件不存在";
+        conn->getReactor()->handleWrite(conn, response.dump());
+        return;
+    }
     std::string path = "./files/" + file_name;
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs) {
@@ -1032,11 +1048,20 @@ void ChatService::pullFile(std::shared_ptr<Connection> conn, const json& js) {
 void ChatService::saveFile(int message_id,
                            const std::string& file_name,
                            const std::string& file_data) {
+    std::string name = basename(file_name);
+    if (name.empty() || name == "." || name == "..") {
+        return;
+    }
     std::string path =
-        "./files/" + std::to_string(message_id) + "_" + file_name;
+        "./files/" + std::to_string(message_id) + "_" + name;
     std::ofstream ofs(path, std::ios::binary);
     std::string decoded = base64Decode(file_data);
     ofs.write(decoded.data(), decoded.size());
+}
+
+std::string ChatService::basename(const std::string& path) {
+    size_t pos = path.find_last_of('/');
+    return (pos == std::string::npos) ? path : path.substr(pos + 1);
 }
 
 std::string ChatService::base64Encode(const std::string& data) {
@@ -1053,7 +1078,7 @@ std::string ChatService::base64Encode(const std::string& data) {
         }
     }
     if (bits > -6) {
-        encoded.push_back(table[((val << 6) >> bits) & 0x3F]);
+        encoded.push_back(table[((val << 8) >> (bits + 8)) & 0x3F]);
     }
     while (encoded.size() % 4) {
         encoded.push_back('=');

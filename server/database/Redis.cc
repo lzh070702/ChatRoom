@@ -4,10 +4,21 @@
 
 Redis::Redis() {
     m_conn = redisConnect("127.0.0.1", 6379);
+    if (m_conn == nullptr || m_conn->err) {
+        LOG(ERROR) << "Redis connect failed: "
+                   << (m_conn ? m_conn->errstr : "out of memory");
+        if (m_conn) {
+            redisFree(m_conn);
+        }
+        m_conn = nullptr;
+    }
 }
 
 bool Redis::lpush(const std::string& key, const std::string& value) {
     std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_conn == nullptr) {
+        return false;
+    }
     redisReply* reply = (redisReply*)redisCommand(m_conn, "LPUSH %s %s",
                                                   key.c_str(), value.c_str());
     if (reply == nullptr) {
@@ -21,6 +32,9 @@ bool Redis::lpush(const std::string& key, const std::string& value) {
 
 bool Redis::rpop(const std::string& key, std::string& value) {
     std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_conn == nullptr) {
+        return false;
+    }
     redisReply* reply =
         (redisReply*)redisCommand(m_conn, "RPOP %s", key.c_str());
     if (reply == nullptr) {

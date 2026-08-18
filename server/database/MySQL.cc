@@ -62,6 +62,21 @@ bool MySQL::queryAll(const std::string& sql,
     return true;
 }
 
+std::string MySQL::escape(const std::string& str) {
+    MYSQL* conn = m_pool->borrow();
+    std::string out = escape(conn, str);
+    m_pool->returnConn(conn);
+    return out;
+}
+
+std::string MySQL::escape(MYSQL* conn, const std::string& str) {
+    std::string out(str.size() * 2 + 1, '\0');
+    unsigned long len =
+        mysql_real_escape_string(conn, &out[0], str.c_str(), str.size());
+    out.resize(len);
+    return out;
+}
+
 MYSQL* MySQL::transaction() {
     MYSQL* conn = m_pool->borrow();
     if (mysql_autocommit(conn, false) != 0) {
