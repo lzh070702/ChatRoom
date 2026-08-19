@@ -88,32 +88,80 @@ void ioLoop() {
     close(epfd);
 }
 
-void on_line(char* line) {
-    if (line == nullptr) {
+void on_line(char* input) {
+    if (input == nullptr) {
         g_running = false;
         g_ipt_cv.notify_all();
         g_rsp_cv.notify_all();
         return;
     }
+    std::string line(input);
+    if (line == "/getline") {
+        g_is_getline = true;
+        free(input);
+        std::cout << "\033[A\033[K";
+        return;
+    }
+    if (line == "/readline") {
+        g_is_getline = false;
+        free(input);
+        std::cout << "\033[A\033[K";
+        return;
+    }
+    if (line.empty()) {
+        free(input);
+        fprintf(rl_outstream, "\033[A");
+        return;
+    }
+    std::vector<std::string> lines;
+    int N = splitLines(line, lines);
+    for (int i = 0; i < N; ++i) {
+        std::cout << "\033[A\033[K";
+    }
+    if (g_is_getline) {
+        for (const auto& str : lines) {
+            processLine(str);
+        }
+    } else {
+        processLine(line);
+    }
+    free(input);
+}
+
+int splitLines(const std::string& str, std::vector<std::string>& lines) {
+    lines.clear();
+    size_t start = 0;
+    int N = 0;
+    while (start < str.size()) {
+        size_t pos = str.find('\n', start);
+        if (pos == std::string::npos) {
+            std::string line = str.substr(start);
+            lines.push_back(line);
+            N += static_cast<int>(line.size() / 80);
+            break;
+        }
+        std::string line = str.substr(start, pos - start);
+        lines.push_back(line);
+        N += static_cast<int>(line.size() / 80);
+        start = pos + 1;
+    }
+    N += static_cast<int>(lines.size());
+    return N;
+}
+
+void processLine(const std::string& line) {
+    std::string prompt;
     std::string prefix;
     {
         std::lock_guard<std::mutex> lk(g_ui_mutex);
+        prompt = g_prompt;
         prefix = g_prefix;
     }
-    if (*line) {
-        std::string l(line);
-        for (int i = 0; i < l.size() / 80; i++) {
-            std::cout << "\033[A\033[K";
-        }
-        fprintf(rl_outstream, "\033[A\033[K\033[A\033[K%s %s\n", prefix.c_str(),
-                line);
-        pushIpt(line);
-    } else {
-        fprintf(rl_outstream, "\033[A");
+    fprintf(rl_outstream, "\033[A\033[K%s %s\n", prefix.c_str(), line.c_str());
+    if (isInChat()) {
+        fprintf(rl_outstream, "%s\n", prompt.c_str());
     }
-    free(line);
-    rl_callback_handler_remove();
-    rl_callback_handler_install("", on_line);
+    pushIpt(line);
 }
 
 void parseOpt(const std::string& msg,

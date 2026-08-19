@@ -279,12 +279,12 @@ void chat(TcpClient& client, const json& f) {
         if (input == "/q") {
             break;
         }
-        if (input.rfind("put ", 0) == 0) {
-            uploadFile(client, id, input.substr(4));
+        if (input.rfind("/put ", 0) == 0) {
+            uploadFile(client, id, input.substr(5));
             continue;
         }
-        if (input.rfind("get ", 0) == 0) {
-            downloadFile(client, input.substr(4));
+        if (input.rfind("/get ", 0) == 0) {
+            downloadFile(client, input.substr(5));
             continue;
         }
         json req;
@@ -297,7 +297,6 @@ void chat(TcpClient& client, const json& f) {
         if (rsp["code"] != 1) {
             pushOpt(RED + std::string(rsp["msg"]) + RESET);
         }
-        pushOpt("======================");
     }
     setChatSession(-1, -1);
 }
@@ -358,6 +357,7 @@ void uploadFile(TcpClient& client, int id, const std::string& path) {
     req["file_data"] = base64Encode(data);
     client.sendData(req.dump());
     json rsp = popRsp();
+    pushOpt("\033[A\033[K\033[A");
     if (rsp["code"] != 1) {
         pushOpt(RED + std::string(rsp["msg"]) + RESET);
     } else {
@@ -377,13 +377,10 @@ void downloadFile(TcpClient& client, const std::string& ref) {
         return;
     }
     std::string name = ref;
-    size_t pos = name.find('_');
-    if (pos != std::string::npos) {
-        name = name.substr(pos + 1);
-    }
     std::string data = base64Decode(std::string(rsp["file_data"]));
     std::ofstream ofs("./downloads/" + name, std::ios::binary);
     ofs.write(data.data(), data.size());
+    pushOpt("\033[A\033[K\033[A");
     pushOpt(GREEN + std::string("文件已保存为: downloads/") + name + RESET);
     pushOpt("======================");
 }

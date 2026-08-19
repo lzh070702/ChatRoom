@@ -26,6 +26,8 @@ std::condition_variable g_rsp_cv;
 std::mutex g_ui_mutex;
 std::string g_prompt;
 std::string g_prefix;
+bool g_is_getline = false;
+
 json g_user;
 
 std::mutex g_chat_mtx;
@@ -154,6 +156,11 @@ void setChatSession(int type, int id) {
 bool isCurrentSession(int type, int id) {
     std::lock_guard<std::mutex> lk(g_chat_mtx);
     return g_chat_type == type && g_chat_id == id;
+}
+
+bool isInChat(){
+    std::lock_guard<std::mutex> lk(g_chat_mtx);
+    return g_chat_type != -1;
 }
 
 std::string base64Encode(const std::string& data) {

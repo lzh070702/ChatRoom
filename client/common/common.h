@@ -12,11 +12,11 @@
 class TcpClient;
 using json = nlohmann::json;
 
-#define RED "\033[1;91m"    // 红色
-#define GREEN "\033[1;92m"  // 绿色
+#define RED "\033[1;91m"     // 红色
+#define GREEN "\033[1;92m"   // 绿色
 #define YELLOW "\033[1;93m"  // 黄色
-#define CYAN "\033[1;96m"  // 青色
-#define RESET "\033[0m"   // 重置
+#define CYAN "\033[1;96m"    // 青色
+#define RESET "\033[0m"      // 重置
 
 // 全局状态
 extern std::atomic<bool> g_running;
@@ -32,6 +32,7 @@ extern std::condition_variable g_rsp_cv;
 extern std::mutex g_ui_mutex;
 extern std::string g_prompt;
 extern std::string g_prefix;
+extern bool g_is_getline;
 extern json g_user;
 extern std::mutex g_chat_mtx;
 extern int g_chat_type;  // -1 无会话, 0 私聊, 1 群聊
@@ -51,6 +52,7 @@ void showTip(const std::string& msg);
 bool confirm(const std::string& msg);
 void setChatSession(int type, int id);
 bool isCurrentSession(int type, int id);
+bool isInChat();
 
 // 编解码
 std::string base64Encode(const std::string& data);

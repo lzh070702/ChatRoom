@@ -420,6 +420,7 @@ void uploadGroupFile(TcpClient& client, int group_id, const std::string& path) {
     req["file_data"] = base64Encode(data);
     client.sendData(req.dump());
     json rsp = popRsp();
+    pushOpt("\033[A\033[K\033[A");
     if (rsp["code"] != 1) {
         pushOpt(RED + std::string(rsp["msg"]) + RESET);
     } else {
@@ -447,12 +448,12 @@ void groupChatPage(TcpClient& client, const json& g) {
         if (input == "/q") {
             break;
         }
-        if (input.rfind("put ", 0) == 0) {
-            uploadGroupFile(client, group_id, input.substr(4));
+        if (input.rfind("/put ", 0) == 0) {
+            uploadGroupFile(client, group_id, input.substr(5));
             continue;
         }
-        if (input.rfind("get ", 0) == 0) {
-            downloadFile(client, input.substr(4));
+        if (input.rfind("/get ", 0) == 0) {
+            downloadFile(client, input.substr(5));
             continue;
         }
         json req;
@@ -465,7 +466,6 @@ void groupChatPage(TcpClient& client, const json& g) {
         if (rsp["code"] != 1) {
             pushOpt(RED + std::string(rsp["msg"]) + RESET);
         }
-        pushOpt("======================");
     }
     setChatSession(-1, -1);
 }
