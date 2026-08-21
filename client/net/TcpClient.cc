@@ -1,5 +1,6 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <cerrno>
@@ -16,6 +17,8 @@ bool TcpClient::connectServer(std::string ip, int port) {
     if (m_fd < 0) {
         return false;
     }
+    int one = 1;
+    setsockopt(m_fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
     sockaddr_in serv{};
     serv.sin_family = AF_INET;
     serv.sin_port = htons(port);
@@ -36,7 +39,7 @@ std::string TcpClient::recvData() {
     if (m_fd == -1) {
         return "";
     }
-    char buf[4096];
+    char buf[65536];
     while (true) {
         ssize_t n = read(m_fd, buf, sizeof(buf));
         if (n > 0) {

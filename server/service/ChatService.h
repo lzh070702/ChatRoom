@@ -1,8 +1,12 @@
 #pragma once
 
+#include <atomic>
+#include <condition_variable>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <nlohmann/json.hpp>
 #include <unordered_map>
 
@@ -30,6 +34,7 @@ class ChatService {
 
    private:
     ChatService();
+    ~ChatService();
 
     void heartbeat(std::shared_ptr<Connection> conn, const json& js);
     void signUp(std::shared_ptr<Connection> conn, const json& js);
@@ -84,4 +89,10 @@ class ChatService {
     std::mutex m_mutex;
     std::unordered_map<std::string, std::string> m_codes;
     std::mutex m_code_mutex;
+
+    std::thread m_db_thread;
+    std::deque<std::function<void()>> m_db_tasks;
+    std::mutex m_db_mtx;
+    std::condition_variable m_db_cv;
+    std::atomic<bool> m_db_stop{false};
 };

@@ -263,7 +263,7 @@ void friendMenu(TcpClient& client, const json& f) {
 void chat(TcpClient& client, const json& f) {
     int id = f["id"];
     std::string name = f["name"];
-    setChatSession(0, id);
+    g_chat = id * 2;
     system("clear");
     pushOpt("私聊: " + name);
     pushOpt("（输入消息，/q 退出）");
@@ -292,13 +292,19 @@ void chat(TcpClient& client, const json& f) {
         req["id"] = id;
         req["msg"] = input;
         req["msg_type"] = false;
+        req["is_lines"] = (g_is_getline == false);
         client.sendData(req.dump());
         json rsp = popRsp();
+        if (!g_running) {
+            break;
+        }
         if (rsp["code"] != 1) {
+            pushOpt("\033[A\033[K");
             pushOpt(RED + std::string(rsp["msg"]) + RESET);
+            pushOpt("======================");
         }
     }
-    setChatSession(-1, -1);
+    g_chat = 0;
 }
 
 void showHistory(TcpClient& client, const json& f, int scope) {
@@ -343,7 +349,9 @@ void viewHistory(TcpClient& client, const json& f) {
 void uploadFile(TcpClient& client, int id, const std::string& path) {
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs) {
+        pushOpt("\033[A\033[K\033[A");
         pushOpt(RED + std::string("文件不存在: ") + path + RESET);
+        pushOpt("======================");
         return;
     }
     std::string data((std::istreambuf_iterator<char>(ifs)),
@@ -352,11 +360,15 @@ void uploadFile(TcpClient& client, int id, const std::string& path) {
     json req;
     req["type"] = 13;
     req["id"] = id;
+    req["is_lines"] = (g_is_getline == false);
     req["msg"] = name;
     req["msg_type"] = true;
     req["file_data"] = base64Encode(data);
     client.sendData(req.dump());
     json rsp = popRsp();
+    if (!g_running) {
+        return;
+    }
     pushOpt("\033[A\033[K\033[A");
     if (rsp["code"] != 1) {
         pushOpt(RED + std::string(rsp["msg"]) + RESET);
@@ -372,8 +384,13 @@ void downloadFile(TcpClient& client, const std::string& ref) {
     req["msg"] = ref;
     client.sendData(req.dump());
     json rsp = popRsp();
+    if (!g_running) {
+        return;
+    }
     if (rsp["code"] != 1) {
+        pushOpt("\033[A\033[K\033[A");
         pushOpt(RED + std::string(rsp["msg"]) + RESET);
+        pushOpt("======================");
         return;
     }
     std::string name = ref;

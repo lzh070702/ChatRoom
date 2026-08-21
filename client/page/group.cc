@@ -250,7 +250,7 @@ static void memberOps(TcpClient& client, int group_id) {
             req["type"] = 19;
             req["group_id"] = group_id;
             req["id"] = target_id;
-            req["agree"] = (choice == "1") ? 1 : 0;
+            req["agree"] = (choice == "1");
             client.sendData(req.dump());
             json rsp2 = popRsp();
             if (!g_running) {
@@ -300,7 +300,7 @@ static void memberOps(TcpClient& client, int group_id) {
             req["type"] = 21;
             req["group_id"] = group_id;
             req["id"] = target_id;
-            req["admin"] = (target_role == 1) ? 1 : 0;
+            req["admin"] = (target_role == 1);
             client.sendData(req.dump());
             json rsp2 = popRsp();
             if (!g_running) {
@@ -359,7 +359,7 @@ void groupMenu(TcpClient& client, const json& g) {
             return;
         }
         if (input == "1") {
-            groupChatPage(client, g);
+            groupChat(client, g);
             continue;
         } else if (input == "2") {
             viewGroupHistory(client, g);
@@ -406,7 +406,9 @@ void groupMenu(TcpClient& client, const json& g) {
 void uploadGroupFile(TcpClient& client, int group_id, const std::string& path) {
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs) {
+        pushOpt("\033[A\033[K\033[A");
         pushOpt(RED + std::string("文件不存在: ") + path + RESET);
+        pushOpt("======================");
         return;
     }
     std::string data((std::istreambuf_iterator<char>(ifs)),
@@ -414,12 +416,16 @@ void uploadGroupFile(TcpClient& client, int group_id, const std::string& path) {
     std::string name = path.substr(path.find_last_of('/') + 1);
     json req;
     req["type"] = 25;
-    req["group_id"] = group_id;
+    req["id"] = group_id;
+    req["is_lines"] = (g_is_getline == false);
     req["msg"] = name;
     req["msg_type"] = true;
     req["file_data"] = base64Encode(data);
     client.sendData(req.dump());
     json rsp = popRsp();
+    if (!g_running) {
+        return;
+    }
     pushOpt("\033[A\033[K\033[A");
     if (rsp["code"] != 1) {
         pushOpt(RED + std::string(rsp["msg"]) + RESET);
@@ -429,10 +435,10 @@ void uploadGroupFile(TcpClient& client, int group_id, const std::string& path) {
     pushOpt("======================");
 }
 
-void groupChatPage(TcpClient& client, const json& g) {
+void groupChat(TcpClient& client, const json& g) {
     int group_id = g["id"];
     std::string group_name = g["name"];
-    setChatSession(1, group_id);
+    g_chat = group_id * 2 + 1;
     system("clear");
     pushOpt("群聊: " + group_name);
     pushOpt("（输入消息，/q 退出）");
@@ -458,16 +464,22 @@ void groupChatPage(TcpClient& client, const json& g) {
         }
         json req;
         req["type"] = 25;
-        req["group_id"] = group_id;
+        req["id"] = group_id;
         req["msg"] = input;
         req["msg_type"] = false;
+        req["is_lines"] = (g_is_getline == false);
         client.sendData(req.dump());
         json rsp = popRsp();
+        if (!g_running) {
+            break;
+        }
         if (rsp["code"] != 1) {
+            pushOpt("\033[A\033[K");
             pushOpt(RED + std::string(rsp["msg"]) + RESET);
+            pushOpt("======================");
         }
     }
-    setChatSession(-1, -1);
+    g_chat = 0;
 }
 
 void showGroupHistory(TcpClient& client, const json& g, int scope) {

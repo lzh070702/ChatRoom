@@ -113,43 +113,50 @@ void on_line(char* input) {
         fprintf(rl_outstream, "\033[A");
         return;
     }
-    std::vector<std::string> lines;
-    int N = splitLines(line, lines);
-    for (int i = 0; i < N; ++i) {
-        std::cout << "\033[A\033[K";
-    }
+    pushIpt(line);
+    clearLines(line);
     if (g_is_getline) {
-        for (const auto& str : lines) {
-            processLine(str);
-        }
+        printLines(line);
     } else {
-        processLine(line);
+        printLine(line);
     }
     free(input);
 }
 
-int splitLines(const std::string& str, std::vector<std::string>& lines) {
-    lines.clear();
-    size_t start = 0;
-    int N = 0;
-    while (start < str.size()) {
-        size_t pos = str.find('\n', start);
-        if (pos == std::string::npos) {
-            std::string line = str.substr(start);
-            lines.push_back(line);
-            N += static_cast<int>(line.size() / 80);
-            break;
-        }
-        std::string line = str.substr(start, pos - start);
-        lines.push_back(line);
-        N += static_cast<int>(line.size() / 80);
-        start = pos + 1;
+void clearLines(const std::string& str) {
+    if (str.empty()) {
+        return;
     }
-    N += static_cast<int>(lines.size());
-    return N;
+    int len = 0;
+    for (char c : str) {
+        if (c == '\n') {
+            std::cout << "\033[A\033[K";
+            len = 0;
+        } else {
+            if (len >= 80) {
+                std::cout << "\033[A\033[K";
+                len = 0;
+            }
+            len++;
+        }
+    }
+    if (str.back() != '\n') {
+        std::cout << "\033[A\033[K";
+    }
 }
 
-void processLine(const std::string& line) {
+void printLines(const std::string& line) {
+    size_t start = 0;
+    for (size_t i = 0; i < line.size(); ++i) {
+        if (line[i] == '\n') {
+            printLine(line.substr(start, i - start));
+            start = i + 1;
+        }
+    }
+    printLine(line.substr(start));
+}
+
+void printLine(const std::string& line) {
     std::string prompt;
     std::string prefix;
     {
@@ -158,10 +165,21 @@ void processLine(const std::string& line) {
         prefix = g_prefix;
     }
     fprintf(rl_outstream, "\033[A\033[K%s %s\n", prefix.c_str(), line.c_str());
-    if (isInChat()) {
+    if (g_chat != 0) {
         fprintf(rl_outstream, "%s\n", prompt.c_str());
     }
-    pushIpt(line);
+}
+
+std::string printMsg(const std::string& name, const std::string& line) {
+    size_t start = 0;
+    for (size_t i = 0; i < line.size(); ++i) {
+        if (line[i] == '\n') {
+            pushOpt("\033[A\033[K" + name + ": " +
+                    line.substr(start, i - start) + "\n");
+            start = i + 1;
+        }
+    }
+    return line.substr(start);
 }
 
 void parseOpt(const std::string& msg,
@@ -172,9 +190,9 @@ void parseOpt(const std::string& msg,
     } catch (...) {
         return;
     }
+    last_recv = std::chrono::steady_clock::now();
     int type = js["type"];
     if (type == 0) {
-        last_recv = std::chrono::steady_clock::now();
         return;
     }
     int code = js["code"];
@@ -185,14 +203,27 @@ void parseOpt(const std::string& msg,
         }
         if (type == 13) {
             bool is_file = js["msg_type"];
-            if (isCurrentSession(0, js["id"])) {
-                rsp = "\033[0m" + std::string(js["name"]) + ": " +
-                      (is_file ? "[文件] " + std::string(js["msg"])
-                               : std::string(js["msg"]));
+            if (g_chat % 2 == 0 && g_chat / 2 == js["id"]) {
+                // rsp = "\033[0m" + std::string(js["name"]) + ": " +
+                //       (is_file ? "[文件] " + std::string(js["msg"])
+                //                : std::string(js["msg"]));
+                if (is_file) {
+                    rsp = "\033[0m" + std::string(js["name"]) + ": [文件] " +
+                          std::string(js["msg"]);
+                } else {
+                    if (js["is_lines"]) {
+                        rsp = "\033[0m" + std::string(js["name"]) + ": " +
+                              std::string(js["msg"]);
+                    } else {
+                        rsp = "\033[0m" + std::string(js["name"]) + ": " +
+                              printMsg(std::string(js["name"]),
+                                       std::string(js["msg"]));
+                    }
+                }
             } else {
                 rsp = is_file
                           ? "好友" + std::string(js["name"]) + "发来一个文件"
-                          : "好友" + std::string(js["name"]) + "发来一条消息";
+                          : "好友" + std::string(js["name"]) + "发来新的消息";
             }
         }
         if (type == 17) {
@@ -207,16 +238,29 @@ void parseOpt(const std::string& msg,
         if (type == 25) {
             bool is_file = js["msg_type"];
             std::string sender = js["sender_name"];
-            if (isCurrentSession(1, js["group_id"])) {
-                rsp = "\033[0m" + sender + ": " +
-                      (is_file ? sender + ": [文件] " + std::string(js["msg"])
-                               : sender + ": " + std::string(js["msg"]));
+            if (g_chat % 2 == 1 && g_chat / 2 == js["id"]) {
+                // rsp = "\033[0m" + sender + ": " +
+                //       (is_file ? sender + ": [文件] " +
+                //       std::string(js["msg"])
+                //                : sender + ": " + std::string(js["msg"]));
+                if (is_file) {
+                    rsp = "\033[0m" + sender + ": [文件] " +
+                          std::string(js["msg"]);
+                } else {
+                    if (js["is_lines"]) {
+                        rsp =
+                            "\033[0m" + sender + ": " + std::string(js["msg"]);
+                    } else {
+                        rsp = "\033[0m" + sender + ": " +
+                              printMsg(sender, std::string(js["msg"]));
+                    }
+                }
             } else {
                 rsp = is_file
                           ? sender + " 在群聊" + std::string(js["group_name"]) +
                                 "发来一个文件"
                           : sender + " 在群聊" + std::string(js["group_name"]) +
-                                "发来一条消息";
+                                "发来新的消息";
             }
         }
         std::string prompt;
@@ -224,8 +268,9 @@ void parseOpt(const std::string& msg,
             std::lock_guard<std::mutex> lk(g_ui_mutex);
             prompt = g_prompt;
         }
-        pushOpt(CYAN + std::string("\033[A\033[K") + rsp + std::string("\n") +
-                RESET + prompt);
+        std::string opt = std::string(CYAN) + "\033[A\033[K" + rsp +
+                          std::string("\n") + RESET + prompt;
+        pushOpt(opt);
         return;
     }
     pushRsp(js);

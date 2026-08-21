@@ -18,7 +18,7 @@ bool Connection::recvData() {
     if (m_fd == -1) {
         return false;
     }
-    char buf[4096];
+    char buf[65536];
     while (true) {
         ssize_t n = read(m_fd, buf, sizeof(buf));
         if (n > 0) {

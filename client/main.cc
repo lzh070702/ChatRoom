@@ -20,6 +20,7 @@ int main(int argc, char* argv[]) {
     string host = (argc > 1) ? argv[1] : "127.0.0.1";
     int port = (argc > 2) ? stoi(argv[2]) : 8000;
     TcpClient client;
+    g_client = &client;
     if (!client.connectServer(host, port)) {
         cerr << RED << "连接失败" << RESET << endl;
         return 1;

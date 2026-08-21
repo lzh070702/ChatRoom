@@ -26,20 +26,18 @@ std::condition_variable g_rsp_cv;
 std::mutex g_ui_mutex;
 std::string g_prompt;
 std::string g_prefix;
-bool g_is_getline = false;
+
+std::atomic<bool> g_is_getline = true;
+std::atomic<int> g_chat = 0;
 
 json g_user;
-
-std::mutex g_chat_mtx;
-int g_chat_type = -1;  // -1 无会话, 0 私聊, 1 群聊
-int g_chat_id = -1;
+TcpClient* g_client = nullptr;
 
 void printOpt() {
     auto msgs = popOpt();
     if (msgs.empty()) {
         return;
     }
-
     int saved_point = rl_point;
     char* saved_line = rl_copy_text(0, rl_end);
     fprintf(rl_outstream, "\r\033[K");
@@ -145,22 +143,6 @@ bool confirm(const std::string& msg) {
         pushOpt("\033[A\033[K请选择:");
     }
     return false;
-}
-
-void setChatSession(int type, int id) {
-    std::lock_guard<std::mutex> lk(g_chat_mtx);
-    g_chat_type = type;
-    g_chat_id = id;
-}
-
-bool isCurrentSession(int type, int id) {
-    std::lock_guard<std::mutex> lk(g_chat_mtx);
-    return g_chat_type == type && g_chat_id == id;
-}
-
-bool isInChat(){
-    std::lock_guard<std::mutex> lk(g_chat_mtx);
-    return g_chat_type != -1;
 }
 
 std::string base64Encode(const std::string& data) {

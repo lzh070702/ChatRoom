@@ -18,6 +18,10 @@ class MessageModel {
                int type,
                const std::string& msg,
                bool is_file);
+    bool insertBatch(int sender_id,
+                     int receiver_id,
+                     int type,
+                     const std::vector<std::string>& lines);
     bool updateContent(int msg_id, const std::string& content);
     std::vector<json> queryHistory(int user_id, int friend_id, int scope = 0);
     std::vector<json> queryGroupHistory(int group_id, int scope = 0);

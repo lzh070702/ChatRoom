@@ -1,6 +1,9 @@
 #include <fcntl.h>
 #include <glog/logging.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <sys/eventfd.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 #include "Reactor.h"
@@ -97,6 +100,8 @@ void Reactor ::handleWakeup() {
     epoll_event ev{};
     for (const auto& fd : cfds) {
         fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+        int one = 1;
+        setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
         ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
         auto conn = std::make_shared<Connection>(fd, this);
         ev.data.ptr = conn.get();
@@ -130,6 +135,7 @@ void Reactor ::handleRead(std::shared_ptr<Connection> conn) {
     conn->updateActive();
     std::string msg;
     while (conn->getMessage(msg)) {
+        conn->updateActive();
         try {
             auto js = json::parse(msg);
             ChatService::instance().handle(conn, js);

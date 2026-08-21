@@ -41,7 +41,8 @@ ChatService::ChatService()
       m_friend_model(&m_mysql_pool),
       m_group_model(&m_mysql_pool),
       m_message_model(&m_mysql_pool) {
-    if (!m_mysql_pool.init(4, "chatserver", "123456", "chatroom",
+    // 连接池：4 个 reactor 线程 + 1 个后台写线程，留余量避免争用
+    if (!m_mysql_pool.init(8, "chatserver", "123456", "chatroom",
                            "127.0.0.1")) {
         LOG(FATAL) << "MySQL pool init failed";
     }
@@ -129,6 +130,34 @@ ChatService::ChatService()
     m_handlers[27] = [this](std::shared_ptr<Connection> c, const json& j) {
         pullFile(c, j);
     };
+
+    m_db_thread = std::thread([this] {
+        while (true) {
+            std::function<void()> task;
+            {
+                std::unique_lock<std::mutex> lk(m_db_mtx);
+                m_db_cv.wait(
+                    lk, [this] { return !m_db_tasks.empty() || m_db_stop; });
+                if (m_db_tasks.empty()) {
+                    return;
+                }
+                task = std::move(m_db_tasks.front());
+                m_db_tasks.pop_front();
+            }
+            task();
+        }
+    });
+}
+
+ChatService::~ChatService() {
+    {
+        std::lock_guard<std::mutex> lk(m_db_mtx);
+        m_db_stop = true;
+    }
+    m_db_cv.notify_all();
+    if (m_db_thread.joinable()) {
+        m_db_thread.join();
+    }
 }
 
 void ChatService::heartbeat(std::shared_ptr<Connection> conn, const json& js) {
@@ -523,6 +552,7 @@ void ChatService::oneChat(std::shared_ptr<Connection> conn, const json& js) {
     int friend_id = js["id"];
     int user_id = conn->getUserId();
     bool is_file = js["msg_type"];
+    bool is_lines = js["is_lines"];
     std::string content = js["msg"];
     User user;
     if (!m_user_model.queryById(friend_id, user)) {
@@ -540,17 +570,24 @@ void ChatService::oneChat(std::shared_ptr<Connection> conn, const json& js) {
             conn, R"({"type":13,"code":0,"msg":"已被对方拉黑"})");
         return;
     }
-    int msg_id =
-        m_message_model.insert(user_id, friend_id, 0, content, is_file);
-    if (msg_id == -1) {
-        conn->getReactor()->handleWrite(
-            conn, R"({"type":13,"code":0,"msg":"消息发送失败"})");
-        return;
-    }
     if (is_file) {
+        int msg_id =
+            m_message_model.insert(user_id, friend_id, 0, content, is_file);
+        if (msg_id == -1) {
+            conn->getReactor()->handleWrite(
+                conn, R"({"type":13,"code":0,"msg":"消息发送失败"})");
+            return;
+        }
         saveFile(msg_id, content, js["file_data"]);
         content = std::to_string(msg_id) + "_" + content;
         m_message_model.updateContent(msg_id, content);
+    } else if (is_lines) {
+        if (m_message_model.insert(user_id, friend_id, 0, content, false) ==
+            -1) {
+            conn->getReactor()->handleWrite(
+                conn, R"({"type":13,"code":0,"msg":"字数过长"})");
+            return;
+        }
     }
     User sender;
     m_user_model.queryById(user_id, sender);
@@ -559,6 +596,7 @@ void ChatService::oneChat(std::shared_ptr<Connection> conn, const json& js) {
     response["code"] = 2;
     response["id"] = user_id;
     response["name"] = sender.getName();
+    response["is_lines"] = js["is_lines"];
     response["msg"] = content;
     response["msg_type"] = js["msg_type"];
     std::shared_ptr<Connection> friend_conn;
@@ -573,18 +611,31 @@ void ChatService::oneChat(std::shared_ptr<Connection> conn, const json& js) {
         friend_conn->getReactor()->post([friend_conn, data = response.dump()] {
             friend_conn->sendData(data + '\n');
         });
-        conn->getReactor()->handleWrite(
-            conn, R"({"type":13,"code":1,"msg":"发送成功"})");
-        return;
-    }
-    if (!m_redis.lpush("offline_msg:" + std::to_string(friend_id),
-                       response.dump())) {
-        conn->getReactor()->handleWrite(
-            conn, R"({"type":13,"code":0,"msg":"消息发送失败"})");
-        return;
+    } else {
+        m_redis.lpush("offline_msg:" + std::to_string(friend_id),
+                      response.dump());
     }
     conn->getReactor()->handleWrite(conn,
                                     R"({"type":13,"code":1,"msg":"发送成功"})");
+    if (!is_file && !is_lines) {
+        {
+            std::lock_guard<std::mutex> lk(m_db_mtx);
+            m_db_tasks.push_back([this, user_id, friend_id,
+                                  content = std::move(content)] {
+                std::vector<std::string> lines;
+                size_t start = 0;
+                for (size_t i = 0; i < content.size(); ++i) {
+                    if (content[i] == '\n') {
+                        lines.push_back(content.substr(start, i - start));
+                        start = i + 1;
+                    }
+                }
+                lines.push_back(content.substr(start));
+                m_message_model.insertBatch(user_id, friend_id, 0, lines);
+            });
+        }
+        m_db_cv.notify_one();
+    }
 }
 
 void ChatService::queryHistory(std::shared_ptr<Connection> conn,
@@ -928,8 +979,9 @@ void ChatService::dissolveGroup(std::shared_ptr<Connection> conn,
 }
 
 void ChatService::groupChat(std::shared_ptr<Connection> conn, const json& js) {
-    int group_id = js["group_id"];
+    int group_id = js["id"];
     int user_id = conn->getUserId();
+    bool is_lines = js["is_lines"];
     bool is_file = js["msg_type"];
     std::string content = js["msg"];
     if (m_group_model.getRole(group_id, user_id) <= 0) {
@@ -937,16 +989,24 @@ void ChatService::groupChat(std::shared_ptr<Connection> conn, const json& js) {
             conn, R"({"type":25,"code":0,"msg":"不在该群中"})");
         return;
     }
-    int msg_id = m_message_model.insert(user_id, group_id, 1, content, is_file);
-    if (msg_id == -1) {
-        conn->getReactor()->handleWrite(
-            conn, R"({"type":25,"code":0,"msg":"消息发送失败"})");
-        return;
-    }
     if (is_file) {
+        int msg_id =
+            m_message_model.insert(user_id, group_id, 1, content, is_file);
+        if (msg_id == -1) {
+            conn->getReactor()->handleWrite(
+                conn, R"({"type":25,"code":0,"msg":"消息发送失败"})");
+            return;
+        }
         saveFile(msg_id, content, js["file_data"]);
         content = std::to_string(msg_id) + "_" + content;
         m_message_model.updateContent(msg_id, content);
+    } else if (is_lines) {
+        if (m_message_model.insert(user_id, group_id, 1, content, false) ==
+            -1) {
+            conn->getReactor()->handleWrite(
+                conn, R"({"type":25,"code":0,"msg":"字数过长"})");
+            return;
+        }
     }
     User sender;
     m_user_model.queryById(user_id, sender);
@@ -954,10 +1014,11 @@ void ChatService::groupChat(std::shared_ptr<Connection> conn, const json& js) {
     json response;
     response["type"] = 25;
     response["code"] = 2;
-    response["group_id"] = group_id;
+    response["id"] = group_id;
     response["sender_id"] = user_id;
     response["sender_name"] = sender.getName();
     response["group_name"] = m_group_model.getGroupName(group_id);
+    response["is_lines"] = js["is_lines"];
     response["msg"] = content;
     response["msg_type"] = js["msg_type"];
     for (auto& [member_id, role] : members) {
@@ -984,6 +1045,25 @@ void ChatService::groupChat(std::shared_ptr<Connection> conn, const json& js) {
     }
     conn->getReactor()->handleWrite(conn,
                                     R"({"type":25,"code":1,"msg":"发送成功"})");
+    if (!is_file && !is_lines) {
+        {
+            std::lock_guard<std::mutex> lk(m_db_mtx);
+            m_db_tasks.push_back([this, user_id, group_id,
+                                  content = std::move(content)] {
+                std::vector<std::string> lines;
+                size_t start = 0;
+                for (size_t i = 0; i < content.size(); ++i) {
+                    if (content[i] == '\n') {
+                        lines.push_back(content.substr(start, i - start));
+                        start = i + 1;
+                    }
+                }
+                lines.push_back(content.substr(start));
+                m_message_model.insertBatch(user_id, group_id, 1, lines);
+            });
+        }
+        m_db_cv.notify_one();
+    }
 }
 
 void ChatService::queryGroupHistory(std::shared_ptr<Connection> conn,
