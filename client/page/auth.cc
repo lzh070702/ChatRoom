@@ -11,9 +11,7 @@ static std::string formatOffline(const json& m) {
         return std::string(m["name"]) + std::string(m["msg"]);
     }
     if (type == 13) {
-        bool is_file = m["msg_type"];
-        return is_file ? "好友" + std::string(m["name"]) + "发来一个文件"
-                       : "好友" + std::string(m["name"]) + "发来一条消息";
+        return "好友" + std::string(m["name"]) + "发来新的消息";
     }
     if (type == 17) {
         return std::string(m["msg"]) + std::string(m["group_name"]);
@@ -25,12 +23,8 @@ static std::string formatOffline(const json& m) {
         return std::string(m["msg"]);
     }
     if (type == 25) {
-        bool is_file = m["msg_type"];
         std::string sender = m["sender_name"];
-        return is_file ? sender + " 在群聊" + std::string(m["group_name"]) +
-                             "发来一个文件"
-                       : sender + " 在群聊" + std::string(m["group_name"]) +
-                             "发来一条消息";
+        return "群聊" + std::string(m["group_name"]) + "发来新的消息";
     }
     return "";
 }

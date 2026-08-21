@@ -204,9 +204,6 @@ void parseOpt(const std::string& msg,
         if (type == 13) {
             bool is_file = js["msg_type"];
             if (g_chat % 2 == 0 && g_chat / 2 == js["id"]) {
-                // rsp = "\033[0m" + std::string(js["name"]) + ": " +
-                //       (is_file ? "[文件] " + std::string(js["msg"])
-                //                : std::string(js["msg"]));
                 if (is_file) {
                     rsp = "\033[0m" + std::string(js["name"]) + ": [文件] " +
                           std::string(js["msg"]);
@@ -221,9 +218,7 @@ void parseOpt(const std::string& msg,
                     }
                 }
             } else {
-                rsp = is_file
-                          ? "好友" + std::string(js["name"]) + "发来一个文件"
-                          : "好友" + std::string(js["name"]) + "发来新的消息";
+                rsp = "好友" + std::string(js["name"]) + "发来新的消息";
             }
         }
         if (type == 17) {
@@ -239,10 +234,6 @@ void parseOpt(const std::string& msg,
             bool is_file = js["msg_type"];
             std::string sender = js["sender_name"];
             if (g_chat % 2 == 1 && g_chat / 2 == js["id"]) {
-                // rsp = "\033[0m" + sender + ": " +
-                //       (is_file ? sender + ": [文件] " +
-                //       std::string(js["msg"])
-                //                : sender + ": " + std::string(js["msg"]));
                 if (is_file) {
                     rsp = "\033[0m" + sender + ": [文件] " +
                           std::string(js["msg"]);
@@ -256,11 +247,7 @@ void parseOpt(const std::string& msg,
                     }
                 }
             } else {
-                rsp = is_file
-                          ? sender + " 在群聊" + std::string(js["group_name"]) +
-                                "发来一个文件"
-                          : sender + " 在群聊" + std::string(js["group_name"]) +
-                                "发来新的消息";
+                rsp = "群聊" + std::string(js["group_name"]) + "发来新的消息";
             }
         }
         std::string prompt;

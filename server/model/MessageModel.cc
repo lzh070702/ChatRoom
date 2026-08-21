@@ -113,13 +113,11 @@ std::vector<json> MessageModel::queryGroupHistory(int group_id, int scope) {
 
 bool MessageModel::removeAll(int user_id) {
     char sql[1024] = {0};
-    // 删除该用户发送的消息（私聊 + 群聊）
     snprintf(sql, sizeof(sql), "DELETE FROM message WHERE sender_id = %d;",
              user_id);
     if (!m_mysql.update(sql)) {
         return false;
     }
-    // 删除该用户收到的私聊消息
     snprintf(sql, sizeof(sql),
              "DELETE FROM message WHERE type = 0 AND receiver_id = %d;",
              user_id);
