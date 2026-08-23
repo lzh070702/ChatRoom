@@ -4,24 +4,15 @@ MessageModel::MessageModel(MySQLPool* pool) {
     m_mysql.setPool(pool);
 }
 
-int MessageModel::insert(int sender_id,
-                         int receiver_id,
-                         int type,
-                         const std::string& msg,
-                         bool is_file) {
+int MessageModel::insertFile(const std::string& file) {
     std::string sql =
-        "INSERT INTO message(sender_id, receiver_id, type, content, is_file) "
+        "INSERT INTO file(file) "
         "VALUES(" +
-        std::to_string(sender_id) + "," + std::to_string(receiver_id) + "," +
-        std::to_string(type) + ",'" + m_mysql.escape(msg) + "'," +
-        (is_file ? "1" : "0") + ");";
+        m_mysql.escape(file) + ");";
     return m_mysql.updateAndGetId(sql);
 }
 
-bool MessageModel::insertBatch(int sender_id,
-                               int receiver_id,
-                               int type,
-                               const std::vector<std::string>& lines) {
+bool MessageModel::insertBatch(const std::vector<std::string>& lines) {
     if (lines.empty()) {
         return true;
     }
@@ -30,12 +21,17 @@ bool MessageModel::insertBatch(int sender_id,
         return false;
     }
     for (const auto& line : lines) {
+        json msg = json::parse(line);
+        int sid = msg["sid"];
+        int rid = msg["rid"];
+        int type = msg["type"] == 13 ? 0 : 1;
+        int is_file = msg["msg_type"];
         std::string sql =
             "INSERT INTO message(sender_id, receiver_id, type, content, "
             "is_file) VALUES(" +
-            std::to_string(sender_id) + "," + std::to_string(receiver_id) +
-            "," + std::to_string(type) + ",'" + m_mysql.escape(conn, line) +
-            "',0);";
+            std::to_string(sid) + "," + std::to_string(rid) + "," +
+            std::to_string(type) + ",'" + m_mysql.escape(conn, msg["msg"]) +
+            "'," + std::to_string(is_file) + ");";
         if (mysql_query(conn, sql.c_str())) {
             m_mysql.rollback(conn);
             return false;
@@ -44,10 +40,9 @@ bool MessageModel::insertBatch(int sender_id,
     return m_mysql.commit(conn);
 }
 
-bool MessageModel::updateContent(int msg_id, const std::string& content) {
-    std::string sql = "UPDATE message SET content = '" +
-                      m_mysql.escape(content) +
-                      "' WHERE id = " + std::to_string(msg_id) + ";";
+bool MessageModel::updateContent(int id, const std::string& file) {
+    std::string sql = "UPDATE file SET file = '" + m_mysql.escape(file) +
+                      "' WHERE id = " + std::to_string(id) + ";";
     return m_mysql.update(sql);
 }
 

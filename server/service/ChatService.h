@@ -6,8 +6,8 @@
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <thread>
 #include <nlohmann/json.hpp>
+#include <thread>
 #include <unordered_map>
 
 #include "../database/MySQLPool.h"
@@ -65,6 +65,8 @@ class ChatService {
     void queryGroupHistory(std::shared_ptr<Connection> conn, const json& js);
     void pullFile(std::shared_ptr<Connection> conn, const json& js);
 
+    void flushMsgList();
+
     std::string base64Encode(const std::string& data);
     std::string base64Decode(const std::string& encoded);
     void saveFile(int message_id,
@@ -89,7 +91,6 @@ class ChatService {
     std::mutex m_mutex;
     std::unordered_map<std::string, std::string> m_codes;
     std::mutex m_code_mutex;
-
     std::thread m_db_thread;
     std::deque<std::function<void()>> m_db_tasks;
     std::mutex m_db_mtx;

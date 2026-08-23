@@ -39,7 +39,7 @@ void friendPage(TcpClient& client) {
         pushOpt("======================");
         pushOpt("1. 添加好友");
         pushOpt("2. 好友列表");
-        pushOpt("3. 返回");
+        pushOpt("0. 返回");
         pushOpt("======================");
         setPrompt("请选择:");
         setPrefix("选择:");
@@ -48,7 +48,7 @@ void friendPage(TcpClient& client) {
             addFriend(client);
         } else if (input == "2") {
             friendList(client);
-        } else if (input == "3") {
+        } else if (input == "0") {
             return;
         }
     }
@@ -77,19 +77,8 @@ void addFriend(TcpClient& client) {
         } else {
             pushOpt(RED + std::string(rsp["msg"]) + RESET);
         }
-        pushOpt("======================");
-        pushOpt("1. 继续添加    2. 返回");
-        pushOpt("======================");
-        setPrompt("请选择:");
-        setPrefix("选择:");
-        while (g_running) {
-            std::string input = popIpt();
-            if (input == "1") {
-                break;
-            } else if (input == "2") {
-                return;
-            }
-            pushOpt("\033[A\033[K请选择:");
+        if (!confirm("是否继续添加？")) {
+            return;
         }
     }
 }
@@ -106,7 +95,6 @@ void friendList(TcpClient& client) {
         }
         pushOpt("────── 好友列表 ──────");
         pushOpt("======================");
-        pushOpt("0. 返回");
         int cnt = 0;
         for (auto& f : rsp["friends"]) {
             cnt++;
@@ -130,6 +118,7 @@ void friendList(TcpClient& client) {
         if (cnt == 0) {
             pushOpt("（暂无好友）");
         }
+        pushOpt("0. 返回");
         pushOpt("======================");
         setPrompt("请选择好友 :");
         setPrefix("好友:");
@@ -158,20 +147,20 @@ void friendMenu(TcpClient& client, const json& f) {
             pushOpt("2. 查看聊天记录");
             pushOpt("3. 拉黑");
             pushOpt("4. 删除");
-            pushOpt("5. 返回");
+            pushOpt("0. 返回");
         } else if (status == 3) {
             pushOpt("1. 私聊");
             pushOpt("2. 查看聊天记录");
             pushOpt("3. 取消拉黑");
             pushOpt("4. 删除");
-            pushOpt("5. 返回");
+            pushOpt("0. 返回");
         } else if (status == 0) {
             pushOpt("1. 同意");
             pushOpt("2. 拒绝");
-            pushOpt("3. 返回");
+            pushOpt("0. 返回");
         } else {
             pushOpt("等待对方同意");
-            pushOpt("1. 返回");
+            pushOpt("0. 返回");
         }
         pushOpt("======================");
         setPrompt("请选择:");
@@ -181,7 +170,7 @@ void friendMenu(TcpClient& client, const json& f) {
         bool send = false;
         if (status == 2) {
             if (input == "1") {
-                chat(client, f);
+                onechat(client, f);
                 continue;
             } else if (input == "2") {
                 viewHistory(client, f);
@@ -200,12 +189,12 @@ void friendMenu(TcpClient& client, const json& f) {
                 req["type"] = 12;
                 req["id"] = id;
                 send = true;
-            } else if (input == "5") {
+            } else if (input == "0") {
                 return;
             }
         } else if (status == 3) {
             if (input == "1") {
-                chat(client, f);
+                onechat(client, f);
                 continue;
             } else if (input == "2") {
                 viewHistory(client, f);
@@ -224,7 +213,7 @@ void friendMenu(TcpClient& client, const json& f) {
                 req["type"] = 12;
                 req["id"] = id;
                 send = true;
-            } else if (input == "5") {
+            } else if (input == "0") {
                 return;
             }
         } else if (status == 0) {
@@ -238,11 +227,11 @@ void friendMenu(TcpClient& client, const json& f) {
                 req["id"] = id;
                 req["agree"] = 0;
                 send = true;
-            } else if (input == "3") {
+            } else if (input == "0") {
                 return;
             }
         } else {
-            if (input == "1") {
+            if (input == "0") {
                 return;
             }
         }
@@ -260,7 +249,7 @@ void friendMenu(TcpClient& client, const json& f) {
     }
 }
 
-void chat(TcpClient& client, const json& f) {
+void onechat(TcpClient& client, const json& f) {
     int id = f["id"];
     std::string name = f["name"];
     g_chat = id * 2;
@@ -289,10 +278,9 @@ void chat(TcpClient& client, const json& f) {
         }
         json req;
         req["type"] = 13;
-        req["id"] = id;
+        req["rid"] = id;
         req["msg"] = input;
         req["msg_type"] = false;
-        req["is_lines"] = (g_is_getline == false);
         client.sendData(req.dump());
         json rsp = popRsp();
         if (!g_running) {
@@ -359,8 +347,7 @@ void uploadFile(TcpClient& client, int id, const std::string& path) {
     std::string name = path.substr(path.find_last_of('/') + 1);
     json req;
     req["type"] = 13;
-    req["id"] = id;
-    req["is_lines"] = (g_is_getline == false);
+    req["rid"] = id;
     req["msg"] = name;
     req["msg_type"] = true;
     req["file_data"] = base64Encode(data);

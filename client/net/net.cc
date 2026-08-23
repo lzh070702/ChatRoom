@@ -113,14 +113,27 @@ void on_line(char* input) {
         fprintf(rl_outstream, "\033[A");
         return;
     }
-    pushIpt(line);
-    clearLines(line);
     if (g_is_getline) {
+        pushIpts(line);
+        clearLines(line);
         printLines(line);
     } else {
+        pushIpt(line);
+        clearLines(line);
         printLine(line);
     }
     free(input);
+}
+
+void pushIpts(const std::string& str) {
+    size_t start = 0;
+    for (size_t i = 0; i < str.size(); ++i) {
+        if (str[i] == '\n') {
+            pushIpt(str.substr(start, i - start));
+            start = i + 1;
+        }
+    }
+    pushIpt(str.substr(start));
 }
 
 void clearLines(const std::string& str) {
@@ -203,19 +216,14 @@ void parseOpt(const std::string& msg,
         }
         if (type == 13) {
             bool is_file = js["msg_type"];
-            if (g_chat % 2 == 0 && g_chat / 2 == js["id"]) {
+            if (g_chat % 2 == 0 && g_chat / 2 == js["sid"]) {
                 if (is_file) {
                     rsp = "\033[0m" + std::string(js["name"]) + ": [文件] " +
                           std::string(js["msg"]);
                 } else {
-                    if (js["is_lines"]) {
-                        rsp = "\033[0m" + std::string(js["name"]) + ": " +
-                              std::string(js["msg"]);
-                    } else {
-                        rsp = "\033[0m" + std::string(js["name"]) + ": " +
-                              printMsg(std::string(js["name"]),
-                                       std::string(js["msg"]));
-                    }
+                    rsp = "\033[0m" + std::string(js["name"]) + ": " +
+                          printMsg(std::string(js["name"]),
+                                   std::string(js["msg"]));
                 }
             } else {
                 rsp = "好友" + std::string(js["name"]) + "发来新的消息";
@@ -232,19 +240,14 @@ void parseOpt(const std::string& msg,
         }
         if (type == 25) {
             bool is_file = js["msg_type"];
-            std::string sender = js["sender_name"];
-            if (g_chat % 2 == 1 && g_chat / 2 == js["id"]) {
+            std::string sender = js["name"];
+            if (g_chat % 2 == 1 && g_chat / 2 == js["rid"]) {
                 if (is_file) {
                     rsp = "\033[0m" + sender + ": [文件] " +
                           std::string(js["msg"]);
                 } else {
-                    if (js["is_lines"]) {
-                        rsp =
-                            "\033[0m" + sender + ": " + std::string(js["msg"]);
-                    } else {
-                        rsp = "\033[0m" + sender + ": " +
-                              printMsg(sender, std::string(js["msg"]));
-                    }
+                    rsp = "\033[0m" + sender + ": " +
+                          printMsg(sender, std::string(js["msg"]));
                 }
             } else {
                 rsp = "群聊" + std::string(js["group_name"]) + "发来新的消息";

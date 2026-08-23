@@ -129,7 +129,7 @@ void showTip(const std::string& msg) {
 bool confirm(const std::string& msg) {
     pushOpt("======================");
     pushOpt(msg);
-    pushOpt("1. 确认    2. 取消");
+    pushOpt("1. 确认    0. 取消");
     pushOpt("======================");
     setPrompt("请选择:");
     setPrefix("选择:");
@@ -137,7 +137,7 @@ bool confirm(const std::string& msg) {
         std::string input = popIpt();
         if (input == "1") {
             return true;
-        } else if (input == "2") {
+        } else if (input == "0") {
             return false;
         }
         pushOpt("\033[A\033[K请选择:");

@@ -23,7 +23,6 @@ static std::string formatOffline(const json& m) {
         return std::string(m["msg"]);
     }
     if (type == 25) {
-        std::string sender = m["sender_name"];
         return "群聊" + std::string(m["group_name"]) + "发来新的消息";
     }
     return "";
@@ -54,7 +53,7 @@ void authOptions(TcpClient& client) {
         pushOpt("1. 密码登录");
         pushOpt("2. 验证码登录");
         pushOpt("3. 注册");
-        pushOpt("4. 退出");
+        pushOpt("0. 退出");
         pushOpt("======================");
         setPrompt("请选择:");
         setPrefix("选择:");
@@ -68,7 +67,7 @@ void authOptions(TcpClient& client) {
         } else if (input == "3") {
             signUp(client);
             continue;
-        } else if (input == "4") {
+        } else if (input == "0") {
             g_running = false;
             g_ipt_cv.notify_all();
             g_rsp_cv.notify_all();
@@ -108,20 +107,9 @@ void signUp(TcpClient& client) {
             showTip(GREEN + std::string(rsp["msg"]) + RESET);
             return;
         }
-        pushOpt("======================");
-        pushOpt(RED + std::string(rsp["msg"]) + RESET);
-        pushOpt("1. 重新注册    2. 返回");
-        pushOpt("======================");
-        setPrompt("请选择:");
-        setPrefix("选择:");
-        while (g_running) {
-            std::string input = popIpt();
-            if (input == "1") {
-                break;
-            } else if (input == "2") {
-                return;
-            }
-            pushOpt("\033[A\033[K请选择:");
+        if (!confirm(RED + std::string(rsp["msg"]) + RESET +
+                     "\n是否重新注册？")) {
+            return;
         }
     }
 }
@@ -157,20 +145,9 @@ void passwordSignIn(TcpClient& client) {
             home(client);
             return;
         }
-        pushOpt("======================");
-        pushOpt(RED + std::string(rsp["msg"]) + RESET);
-        pushOpt("1. 重新登录    2. 返回");
-        pushOpt("======================");
-        setPrompt("请选择:");
-        setPrefix("选择:");
-        while (g_running) {
-            std::string input = popIpt();
-            if (input == "1") {
-                break;
-            } else if (input == "2") {
-                return;
-            }
-            pushOpt("\033[A\033[K请选择:");
+        if (!confirm(RED + std::string(rsp["msg"]) + RESET +
+                     "\n是否重新登录？")) {
+            return;
         }
     }
 }
@@ -193,20 +170,9 @@ void codeSignIn(TcpClient& client) {
             return;
         }
         if (rsp["code"] != 1) {
-            pushOpt("======================");
-            pushOpt(RED + std::string(rsp["msg"]) + RESET);
-            pushOpt("1. 重新输入    2. 返回");
-            pushOpt("======================");
-            setPrompt("请选择:");
-            setPrefix("选择:");
-            while (g_running) {
-                std::string input = popIpt();
-                if (input == "1") {
-                    break;
-                } else if (input == "2") {
-                    return;
-                }
-                pushOpt("\033[A\033[K请选择:");
+            if (!confirm(RED + std::string(rsp["msg"]) + RESET +
+                         "\n是否重新输入？")) {
+                return;
             }
             continue;
         }
@@ -231,20 +197,9 @@ void codeSignIn(TcpClient& client) {
             home(client);
             return;
         }
-        pushOpt("======================");
-        pushOpt(RED + std::string(rsp["msg"]) + RESET);
-        pushOpt("1. 重新登录    2. 返回");
-        pushOpt("======================");
-        setPrompt("请选择:");
-        setPrefix("选择:");
-        while (g_running) {
-            std::string input = popIpt();
-            if (input == "1") {
-                break;
-            } else if (input == "2") {
-                return;
-            }
-            pushOpt("\033[A\033[K请选择:");
+        if (!confirm(RED + std::string(rsp["msg"]) + RESET +
+                     "\n是否重新登录？")) {
+            return;
         }
     }
 }

@@ -12,7 +12,7 @@ bool settings(TcpClient& client) {
         pushOpt("1. 更改密码");
         pushOpt("2. 注销账号");
         pushOpt("3. 退出登录");
-        pushOpt("4. 返回");
+        pushOpt("0. 返回");
         pushOpt("======================");
         setPrompt("请选择:");
         setPrefix("选择:");
@@ -29,7 +29,7 @@ bool settings(TcpClient& client) {
             if (exitLogin(client)) {
                 return false;
             }
-        } else if (input == "4") {
+        } else if (input == "0") {
             return true;
         }
     }
@@ -54,24 +54,12 @@ void changePassword(TcpClient& client) {
             return;
         }
         if (rsp["code"] != 1) {
-            pushOpt("======================");
-            pushOpt(RED + std::string(rsp["msg"]) + RESET);
-            pushOpt("是否重新发送？");
-            pushOpt("1. 确认    2. 返回");
-            pushOpt("======================");
-            setPrompt("请选择");
-            setPrefix("选择:");
-            while (g_running) {
-                std::string input = popIpt();
-                if (input == "1") {
-                    pushOpt("\033[A\033[K\033[A\033[K\033[A\033[K");
-                    pushOpt("\033[A\033[K\033[A\033[K\033[A\033[K");
-                    break;
-                } else if (input == "2") {
-                    return;
-                }
-                pushOpt("\033[A\033[K请选择:");
+            if (!confirm(RED + std::string(rsp["msg"]) + RESET +
+                         "\n是否重新发送？")) {
+                return;
             }
+            pushOpt("\033[A\033[K\033[A\033[K\033[A\033[K");
+            pushOpt("\033[A\033[K\033[A\033[K\033[A\033[K");
         } else {
             break;
         }
@@ -89,24 +77,12 @@ void changePassword(TcpClient& client) {
             return;
         }
         if (rsp["code"] != 1) {
-            pushOpt("======================");
-            pushOpt(RED + std::string(rsp["msg"]) + RESET);
-            pushOpt("是否重新输入？");
-            pushOpt("1. 确认    2. 返回");
-            pushOpt("======================");
-            setPrompt("请选择:");
-            setPrefix("选择:");
-            while (g_running) {
-                std::string input = popIpt();
-                if (input == "1") {
-                    pushOpt("\033[A\033[K\033[A\033[K\033[A\033[K");
-                    pushOpt("\033[A\033[K\033[A\033[K\033[A\033[K\033[A\033[K");
-                    break;
-                } else if (input == "2") {
-                    return;
-                }
-                pushOpt("\033[A\033[K请选择:");
+            if (!confirm(RED + std::string(rsp["msg"]) + RESET +
+                         "\n是否重新输入？")) {
+                return;
             }
+            pushOpt("\033[A\033[K\033[A\033[K\033[A\033[K");
+            pushOpt("\033[A\033[K\033[A\033[K\033[A\033[K\033[A\033[K");
         } else {
             showTip(GREEN + std::string(rsp["msg"]) + RESET);
             break;

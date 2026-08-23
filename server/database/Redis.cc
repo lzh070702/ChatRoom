@@ -2,49 +2,87 @@
 
 #include "Redis.h"
 
-Redis::Redis() {
-    m_conn = redisConnect("127.0.0.1", 6379);
-    if (m_conn == nullptr || m_conn->err) {
-        LOG(ERROR) << "Redis connect failed: "
-                   << (m_conn ? m_conn->errstr : "out of memory");
-        if (m_conn) {
-            redisFree(m_conn);
-        }
-        m_conn = nullptr;
+Redis::Redis() {}
+
+Redis::~Redis() {
+    while (!m_pool.empty()) {
+        redisFree(m_pool.front());
+        m_pool.pop();
     }
 }
 
-bool Redis::lpush(const std::string& key, const std::string& value) {
+bool Redis::init(int size, const std::string& ip, unsigned short port) {
+    for (int i = 0; i < size; i++) {
+        redisContext* conn = redisConnect(ip.c_str(), port);
+        if (conn == nullptr || conn->err) {
+            if (conn) {
+                redisFree(conn);
+            }
+            return false;
+        }
+        m_pool.push(conn);
+    }
+    return true;
+}
+
+redisContext* Redis::borrow() {
+    std::unique_lock<std::mutex> lock(m_mutex);
+    m_cv.wait(lock, [this] { return !m_pool.empty(); });
+    redisContext* conn = m_pool.front();
+    m_pool.pop();
+    return conn;
+}
+
+void Redis::returnConn(redisContext* conn) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    if (m_conn == nullptr) {
-        return false;
-    }
-    redisReply* reply = (redisReply*)redisCommand(m_conn, "LPUSH %s %s",
+    m_pool.push(conn);
+    m_cv.notify_one();
+}
+
+bool Redis::lpush(const std::string& key, const std::string& value) {
+    redisContext* conn = borrow();
+    redisReply* reply = (redisReply*)redisCommand(conn, "LPUSH %s %s",
                                                   key.c_str(), value.c_str());
+    bool success = false;
     if (reply == nullptr) {
-        LOG(ERROR) << "Redis lpush failed: " << m_conn->errstr;
-        return false;
+        LOG(ERROR) << "Redis lpush failed: " << conn->errstr;
+    } else {
+        success = (reply->type == REDIS_REPLY_INTEGER);
+        freeReplyObject(reply);
     }
-    bool success = (reply->type == REDIS_REPLY_INTEGER);
-    freeReplyObject(reply);
+    returnConn(conn);
     return success;
 }
 
 bool Redis::rpop(const std::string& key, std::string& value) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if (m_conn == nullptr) {
-        return false;
-    }
-    redisReply* reply =
-        (redisReply*)redisCommand(m_conn, "RPOP %s", key.c_str());
+    redisContext* conn = borrow();
+    redisReply* reply = (redisReply*)redisCommand(conn, "RPOP %s", key.c_str());
+    bool success = false;
     if (reply == nullptr) {
-        LOG(ERROR) << "Redis rpop failed: " << m_conn->errstr;
-        return false;
+        LOG(ERROR) << "Redis rpop failed: " << conn->errstr;
+    } else {
+        success = (reply->type == REDIS_REPLY_STRING);
+        if (success) {
+            value = reply->str;
+        }
+        freeReplyObject(reply);
     }
-    bool success = (reply->type == REDIS_REPLY_STRING);
-    if (success) {
-        value = reply->str;
-    }
-    freeReplyObject(reply);
+    returnConn(conn);
     return success;
+}
+
+int Redis::getLen() {
+    redisContext* conn = borrow();
+    redisReply* reply = (redisReply*)redisCommand(conn, "LLEN msg");
+    int len = 0;
+    if (reply == nullptr) {
+        LOG(ERROR) << "Redis llen failed: " << conn->errstr;
+    } else {
+        if (reply->type == REDIS_REPLY_INTEGER) {
+            len = static_cast<int>(reply->integer);
+        }
+        freeReplyObject(reply);
+    }
+    returnConn(conn);
+    return len;
 }

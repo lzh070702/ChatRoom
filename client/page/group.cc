@@ -15,7 +15,7 @@ void groupPage(TcpClient& client) {
         pushOpt("1. 我的群聊");
         pushOpt("2. 创建群聊");
         pushOpt("3. 申请入群");
-        pushOpt("4. 返回");
+        pushOpt("0. 返回");
         pushOpt("======================");
         setPrompt("请选择:");
         setPrefix("选择:");
@@ -26,7 +26,7 @@ void groupPage(TcpClient& client) {
             createGroup(client);
         } else if (input == "3") {
             applyGroup(client);
-        } else if (input == "4") {
+        } else if (input == "0") {
             return;
         }
     }
@@ -44,7 +44,6 @@ void groupList(TcpClient& client) {
         }
         pushOpt("────── 我的群聊 ──────");
         pushOpt("======================");
-        pushOpt("0. 返回");
         int cnt = 0;
         for (auto& g : rsp["msg"]) {
             cnt++;
@@ -53,6 +52,7 @@ void groupList(TcpClient& client) {
         if (cnt == 0) {
             pushOpt("（暂无群聊）");
         }
+        pushOpt("0. 返回");
         pushOpt("======================");
         setPrompt("请选择群聊:");
         setPrefix("群聊:");
@@ -140,7 +140,6 @@ static void inviteToGroup(TcpClient& client, int group_id) {
     system("clear");
     pushOpt("──── 邀请好友入群 ────");
     pushOpt("======================");
-    pushOpt("0. 返回");
     int cnt = 0;
     for (auto& f : frsp["friends"]) {
         if (f["status"] >= 2) {
@@ -152,6 +151,7 @@ static void inviteToGroup(TcpClient& client, int group_id) {
     if (cnt == 0) {
         pushOpt("（暂无好友可邀请）");
     }
+    pushOpt("0. 返回");
     pushOpt("======================");
     setPrompt("请选择好友:");
     setPrefix("好友:");
@@ -197,7 +197,6 @@ static void memberOps(TcpClient& client, int group_id) {
         system("clear");
         pushOpt("───── 群成员操作 ─────");
         pushOpt("======================");
-        pushOpt("0. 返回");
         int cnt = 0;
         for (auto& m : rsp["members"]) {
             cnt++;
@@ -209,6 +208,7 @@ static void memberOps(TcpClient& client, int group_id) {
             pushOpt(std::to_string(cnt) + ". " + std::string(m["name"]) + "-" +
                     std::string(m["email"]) + role_name);
         }
+        pushOpt("0. 返回");
         pushOpt("======================");
         setPrompt("请选择成员:");
         setPrefix("成员:");
@@ -236,7 +236,7 @@ static void memberOps(TcpClient& client, int group_id) {
         if (target_role == 0) {
             pushOpt("1. 同意");
             pushOpt("2. 拒绝");
-            pushOpt("3. 返回");
+            pushOpt("0. 返回");
             pushOpt("======================");
             setPrompt("请选择:");
             setPrefix("选择:");
@@ -269,7 +269,7 @@ static void memberOps(TcpClient& client, int group_id) {
         } else {
             pushOpt("2. 撤销管理员");
         }
-        pushOpt("3. 返回");
+        pushOpt("0. 返回");
         pushOpt("======================");
         setPrompt("请选择:");
         setPrefix("选择:");
@@ -350,7 +350,7 @@ void groupMenu(TcpClient& client, const json& g) {
         pushOpt("3. 邀请好友进群");
         pushOpt("4. 群成员操作");
         pushOpt("5. 解散群");
-        pushOpt("6. 返回");
+        pushOpt("0. 返回");
         pushOpt("======================");
         setPrompt("请选择:");
         setPrefix("选择:");
@@ -397,42 +397,10 @@ void groupMenu(TcpClient& client, const json& g) {
                 showTip(GREEN + std::string(rsp2["msg"]) + RESET);
             }
             return;
-        } else if (input == "6") {
+        } else if (input == "0") {
             return;
         }
     }
-}
-
-void uploadGroupFile(TcpClient& client, int group_id, const std::string& path) {
-    std::ifstream ifs(path, std::ios::binary);
-    if (!ifs) {
-        pushOpt("\033[A\033[K\033[A");
-        pushOpt(RED + std::string("文件不存在: ") + path + RESET);
-        pushOpt("======================");
-        return;
-    }
-    std::string data((std::istreambuf_iterator<char>(ifs)),
-                     std::istreambuf_iterator<char>());
-    std::string name = path.substr(path.find_last_of('/') + 1);
-    json req;
-    req["type"] = 25;
-    req["id"] = group_id;
-    req["is_lines"] = (g_is_getline == false);
-    req["msg"] = name;
-    req["msg_type"] = true;
-    req["file_data"] = base64Encode(data);
-    client.sendData(req.dump());
-    json rsp = popRsp();
-    if (!g_running) {
-        return;
-    }
-    pushOpt("\033[A\033[K\033[A");
-    if (rsp["code"] != 1) {
-        pushOpt(RED + std::string(rsp["msg"]) + RESET);
-    } else {
-        pushOpt(GREEN + std::string("文件已发送") + RESET);
-    }
-    pushOpt("======================");
 }
 
 void groupChat(TcpClient& client, const json& g) {
@@ -464,10 +432,9 @@ void groupChat(TcpClient& client, const json& g) {
         }
         json req;
         req["type"] = 25;
-        req["id"] = group_id;
+        req["rid"] = group_id;
         req["msg"] = input;
         req["msg_type"] = false;
-        req["is_lines"] = (g_is_getline == false);
         client.sendData(req.dump());
         json rsp = popRsp();
         if (!g_running) {
@@ -523,4 +490,35 @@ void viewGroupHistory(TcpClient& client, const json& g) {
     setPrompt("（输入任意内容返回）");
     setPrefix("返回:");
     popIpt();
+}
+
+void uploadGroupFile(TcpClient& client, int group_id, const std::string& path) {
+    std::ifstream ifs(path, std::ios::binary);
+    if (!ifs) {
+        pushOpt("\033[A\033[K\033[A");
+        pushOpt(RED + std::string("文件不存在: ") + path + RESET);
+        pushOpt("======================");
+        return;
+    }
+    std::string data((std::istreambuf_iterator<char>(ifs)),
+                     std::istreambuf_iterator<char>());
+    std::string name = path.substr(path.find_last_of('/') + 1);
+    json req;
+    req["type"] = 25;
+    req["rid"] = group_id;
+    req["msg"] = name;
+    req["msg_type"] = true;
+    req["file_data"] = base64Encode(data);
+    client.sendData(req.dump());
+    json rsp = popRsp();
+    if (!g_running) {
+        return;
+    }
+    pushOpt("\033[A\033[K\033[A");
+    if (rsp["code"] != 1) {
+        pushOpt(RED + std::string(rsp["msg"]) + RESET);
+    } else {
+        pushOpt(GREEN + std::string("文件已发送") + RESET);
+    }
+    pushOpt("======================");
 }

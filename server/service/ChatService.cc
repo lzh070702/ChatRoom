@@ -46,6 +46,10 @@ ChatService::ChatService()
                            "127.0.0.1")) {
         LOG(FATAL) << "MySQL pool init failed";
     }
+    // Redis 连接池：4 个 reactor 线程 + 1 个后台写线程，留余量避免争用
+    if (!m_redis.init(8, "127.0.0.1")) {
+        LOG(FATAL) << "Redis pool init failed";
+    }
     m_handlers[0] = [this](std::shared_ptr<Connection> c, const json& j) {
         heartbeat(c, j);
     };
@@ -548,91 +552,84 @@ void ChatService::deleteFriend(std::shared_ptr<Connection> conn,
         conn, R"({"type":12,"code":1,"msg":"成功删除该好友"})");
 }
 
+void ChatService::flushMsgList() {
+    std::vector<std::string> msgs;
+    while (true) {
+        std::string msg;
+        if (!m_redis.rpop("msg", msg)) {
+            break;
+        }
+        msgs.push_back(std::move(msg));
+    }
+    if (!msgs.empty()) {
+        m_message_model.insertBatch(msgs);
+    }
+}
+
 void ChatService::oneChat(std::shared_ptr<Connection> conn, const json& js) {
-    int friend_id = js["id"];
-    int user_id = conn->getUserId();
+    int rid = js["rid"];
+    int sid = conn->getUserId();
     bool is_file = js["msg_type"];
-    bool is_lines = js["is_lines"];
     std::string content = js["msg"];
     User user;
-    if (!m_user_model.queryById(friend_id, user)) {
+    if (!m_user_model.queryById(rid, user)) {
         conn->getReactor()->handleWrite(
             conn, R"({"type":13,"code":0,"msg":"该用户已注销"})");
         return;
     }
-    if (m_friend_model.isFriend(user_id, friend_id) < 2) {
+    if (m_friend_model.isFriend(sid, rid) < 2) {
         conn->getReactor()->handleWrite(
             conn, R"({"type":13,"code":0,"msg":"不是好友，无法聊天"})");
         return;
     }
-    if (m_friend_model.isFriend(friend_id, user_id) == 3) {
+    if (m_friend_model.isFriend(rid, sid) == 3) {
         conn->getReactor()->handleWrite(
             conn, R"({"type":13,"code":0,"msg":"已被对方拉黑"})");
         return;
     }
     if (is_file) {
-        int msg_id =
-            m_message_model.insert(user_id, friend_id, 0, content, is_file);
-        if (msg_id == -1) {
+        int file_id = m_message_model.insertFile(content);
+        if (file_id == -1) {
             conn->getReactor()->handleWrite(
                 conn, R"({"type":13,"code":0,"msg":"消息发送失败"})");
             return;
         }
-        saveFile(msg_id, content, js["file_data"]);
-        content = std::to_string(msg_id) + "_" + content;
-        m_message_model.updateContent(msg_id, content);
-    } else if (is_lines) {
-        if (m_message_model.insert(user_id, friend_id, 0, content, false) ==
-            -1) {
-            conn->getReactor()->handleWrite(
-                conn, R"({"type":13,"code":0,"msg":"字数过长"})");
-            return;
-        }
+        saveFile(file_id, content, js["file_data"]);
+        content = std::to_string(file_id) + "_" + content;
+        m_message_model.updateContent(file_id, content);
     }
     User sender;
-    m_user_model.queryById(user_id, sender);
+    m_user_model.queryById(sid, sender);
     json response;
     response["type"] = 13;
     response["code"] = 2;
-    response["id"] = user_id;
+    response["sid"] = sid;
+    response["rid"] = rid;
     response["name"] = sender.getName();
-    response["is_lines"] = js["is_lines"];
     response["msg"] = content;
     response["msg_type"] = js["msg_type"];
     std::shared_ptr<Connection> friend_conn;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        auto it = m_user_conn.find(friend_id);
+        auto it = m_user_conn.find(rid);
         if (it != m_user_conn.end()) {
             friend_conn = it->second.lock();
         }
     }
+    m_redis.lpush("msg", response.dump());
+    conn->getReactor()->handleWrite(conn,
+                                    R"({"type":13,"code":1,"msg":"发送成功"})");
     if (friend_conn) {
         friend_conn->getReactor()->post([friend_conn, data = response.dump()] {
             friend_conn->sendData(data + '\n');
         });
     } else {
-        m_redis.lpush("offline_msg:" + std::to_string(friend_id),
-                      response.dump());
+        m_redis.lpush("offline_msg:" + std::to_string(rid), response.dump());
     }
-    conn->getReactor()->handleWrite(conn,
-                                    R"({"type":13,"code":1,"msg":"发送成功"})");
-    if (!is_file && !is_lines) {
+    if (m_redis.getLen() > 1000) {
         {
             std::lock_guard<std::mutex> lk(m_db_mtx);
-            m_db_tasks.push_back([this, user_id, friend_id,
-                                  content = std::move(content)] {
-                std::vector<std::string> lines;
-                size_t start = 0;
-                for (size_t i = 0; i < content.size(); ++i) {
-                    if (content[i] == '\n') {
-                        lines.push_back(content.substr(start, i - start));
-                        start = i + 1;
-                    }
-                }
-                lines.push_back(content.substr(start));
-                m_message_model.insertBatch(user_id, friend_id, 0, lines);
-            });
+            m_db_tasks.push_back([this] { flushMsgList(); });
         }
         m_db_cv.notify_one();
     }
@@ -643,13 +640,22 @@ void ChatService::queryHistory(std::shared_ptr<Connection> conn,
     int friend_id = js["id"];
     int user_id = conn->getUserId();
     int scope = js.value("scope", 0);
-    std::vector<json> history =
-        m_message_model.queryHistory(user_id, friend_id, scope);
-    json response;
-    response["type"] = 14;
-    response["code"] = 1;
-    response["msg"] = history;
-    conn->getReactor()->handleWrite(conn, response.dump());
+    {
+        std::lock_guard<std::mutex> lk(m_db_mtx);
+        m_db_tasks.push_back([this, conn, user_id, friend_id, scope] {
+            flushMsgList();
+            std::vector<json> history =
+                m_message_model.queryHistory(user_id, friend_id, scope);
+            json response;
+            response["type"] = 14;
+            response["code"] = 1;
+            response["msg"] = history;
+            conn->getReactor()->post([conn, data = response.dump()] {
+                conn->sendData(data + '\n');
+            });
+        });
+    }
+    m_db_cv.notify_one();
 }
 
 void ChatService::queryGroups(std::shared_ptr<Connection> conn,
@@ -979,50 +985,41 @@ void ChatService::dissolveGroup(std::shared_ptr<Connection> conn,
 }
 
 void ChatService::groupChat(std::shared_ptr<Connection> conn, const json& js) {
-    int group_id = js["id"];
-    int user_id = conn->getUserId();
-    bool is_lines = js["is_lines"];
+    int rid = js["rid"];
+    int sid = conn->getUserId();
     bool is_file = js["msg_type"];
     std::string content = js["msg"];
-    if (m_group_model.getRole(group_id, user_id) <= 0) {
+    if (m_group_model.getRole(rid, sid) <= 0) {
         conn->getReactor()->handleWrite(
             conn, R"({"type":25,"code":0,"msg":"不在该群中"})");
         return;
     }
     if (is_file) {
-        int msg_id =
-            m_message_model.insert(user_id, group_id, 1, content, is_file);
-        if (msg_id == -1) {
+        int file_id = m_message_model.insertFile(content);
+        if (file_id == -1) {
             conn->getReactor()->handleWrite(
                 conn, R"({"type":25,"code":0,"msg":"消息发送失败"})");
             return;
         }
-        saveFile(msg_id, content, js["file_data"]);
-        content = std::to_string(msg_id) + "_" + content;
-        m_message_model.updateContent(msg_id, content);
-    } else if (is_lines) {
-        if (m_message_model.insert(user_id, group_id, 1, content, false) ==
-            -1) {
-            conn->getReactor()->handleWrite(
-                conn, R"({"type":25,"code":0,"msg":"字数过长"})");
-            return;
-        }
+        saveFile(file_id, content, js["file_data"]);
+        content = std::to_string(file_id) + "_" + content;
+        m_message_model.updateContent(file_id, content);
     }
     User sender;
-    m_user_model.queryById(user_id, sender);
-    auto members = m_group_model.queryMembers(group_id);
+    m_user_model.queryById(sid, sender);
+    auto members = m_group_model.queryMembers(rid);
     json response;
     response["type"] = 25;
     response["code"] = 2;
-    response["id"] = group_id;
-    response["sender_id"] = user_id;
-    response["sender_name"] = sender.getName();
-    response["group_name"] = m_group_model.getGroupName(group_id);
-    response["is_lines"] = js["is_lines"];
+    response["sid"] = sid;
+    response["rid"] = rid;
+    response["name"] = sender.getName();
+    response["group_name"] = m_group_model.getGroupName(rid);
     response["msg"] = content;
     response["msg_type"] = js["msg_type"];
+    m_redis.lpush("msg", response.dump());
     for (auto& [member_id, role] : members) {
-        if (member_id == user_id) {
+        if (member_id == sid) {
             continue;
         }
         std::shared_ptr<Connection> member_conn;
@@ -1045,22 +1042,10 @@ void ChatService::groupChat(std::shared_ptr<Connection> conn, const json& js) {
     }
     conn->getReactor()->handleWrite(conn,
                                     R"({"type":25,"code":1,"msg":"发送成功"})");
-    if (!is_file && !is_lines) {
+    if (m_redis.getLen() > 1000) {
         {
             std::lock_guard<std::mutex> lk(m_db_mtx);
-            m_db_tasks.push_back([this, user_id, group_id,
-                                  content = std::move(content)] {
-                std::vector<std::string> lines;
-                size_t start = 0;
-                for (size_t i = 0; i < content.size(); ++i) {
-                    if (content[i] == '\n') {
-                        lines.push_back(content.substr(start, i - start));
-                        start = i + 1;
-                    }
-                }
-                lines.push_back(content.substr(start));
-                m_message_model.insertBatch(user_id, group_id, 1, lines);
-            });
+            m_db_tasks.push_back([this] { flushMsgList(); });
         }
         m_db_cv.notify_one();
     }
@@ -1076,13 +1061,22 @@ void ChatService::queryGroupHistory(std::shared_ptr<Connection> conn,
         return;
     }
     int scope = js.value("scope", 0);
-    std::vector<json> history =
-        m_message_model.queryGroupHistory(group_id, scope);
-    json response;
-    response["type"] = 26;
-    response["code"] = 1;
-    response["msg"] = history;
-    conn->getReactor()->handleWrite(conn, response.dump());
+    {
+        std::lock_guard<std::mutex> lk(m_db_mtx);
+        m_db_tasks.push_back([this, conn, group_id, scope] {
+            flushMsgList();
+            std::vector<json> history =
+                m_message_model.queryGroupHistory(group_id, scope);
+            json response;
+            response["type"] = 26;
+            response["code"] = 1;
+            response["msg"] = history;
+            conn->getReactor()->post([conn, data = response.dump()] {
+                conn->sendData(data + '\n');
+            });
+        });
+    }
+    m_db_cv.notify_one();
 }
 
 void ChatService::pullFile(std::shared_ptr<Connection> conn, const json& js) {
