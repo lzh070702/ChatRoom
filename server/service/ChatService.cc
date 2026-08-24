@@ -41,15 +41,15 @@ ChatService::ChatService()
       m_friend_model(&m_mysql_pool),
       m_group_model(&m_mysql_pool),
       m_message_model(&m_mysql_pool) {
-    // 连接池：4 个 reactor 线程 + 1 个后台写线程，留余量避免争用
+    // 连接池初始化
     if (!m_mysql_pool.init(8, "chatserver", "123456", "chatroom",
                            "127.0.0.1")) {
         LOG(FATAL) << "MySQL pool init failed";
     }
-    // Redis 连接池：4 个 reactor 线程 + 1 个后台写线程，留余量避免争用
     if (!m_redis.init(8, "127.0.0.1")) {
         LOG(FATAL) << "Redis pool init failed";
     }
+    // m_handlers初始化业务函数分发
     m_handlers[0] = [this](std::shared_ptr<Connection> c, const json& j) {
         heartbeat(c, j);
     };
@@ -134,7 +134,7 @@ ChatService::ChatService()
     m_handlers[27] = [this](std::shared_ptr<Connection> c, const json& j) {
         pullFile(c, j);
     };
-
+    // 任务队列取出调用
     m_db_thread = std::thread([this] {
         while (true) {
             std::function<void()> task;

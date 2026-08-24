@@ -416,6 +416,12 @@ void groupChat(TcpClient& client, const json& g) {
     setPrefix("我:");
     while (g_running) {
         std::string input = popIpt();
+        if (input.size() > 65535) {
+            pushOpt("\033[A\033[K");
+            pushOpt(RED "消息内容过长，无法发送" RESET);
+            pushOpt("======================");
+            continue;
+        }
         if (!g_running) {
             break;
         }

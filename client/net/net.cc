@@ -183,18 +183,6 @@ void printLine(const std::string& line) {
     }
 }
 
-std::string printMsg(const std::string& name, const std::string& line) {
-    size_t start = 0;
-    for (size_t i = 0; i < line.size(); ++i) {
-        if (line[i] == '\n') {
-            pushOpt("\033[A\033[K" + name + ": " +
-                    line.substr(start, i - start) + "\n");
-            start = i + 1;
-        }
-    }
-    return line.substr(start);
-}
-
 void parseOpt(const std::string& msg,
               std::chrono::steady_clock::time_point& last_recv) {
     json js;
@@ -222,8 +210,7 @@ void parseOpt(const std::string& msg,
                           std::string(js["msg"]);
                 } else {
                     rsp = "\033[0m" + std::string(js["name"]) + ": " +
-                          printMsg(std::string(js["name"]),
-                                   std::string(js["msg"]));
+                          std::string(js["msg"]);
                 }
             } else {
                 rsp = "好友" + std::string(js["name"]) + "发来新的消息";
@@ -246,8 +233,7 @@ void parseOpt(const std::string& msg,
                     rsp = "\033[0m" + sender + ": [文件] " +
                           std::string(js["msg"]);
                 } else {
-                    rsp = "\033[0m" + sender + ": " +
-                          printMsg(sender, std::string(js["msg"]));
+                    rsp = "\033[0m" + sender + ": " + std::string(js["msg"]);
                 }
             } else {
                 rsp = "群聊" + std::string(js["group_name"]) + "发来新的消息";
