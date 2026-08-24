@@ -1,6 +1,5 @@
 #include <glog/logging.h>
 #include <openssl/sha.h>
-#include <fstream>
 #include <iomanip>
 #include <random>
 #include <sstream>
@@ -130,9 +129,6 @@ ChatService::ChatService()
     };
     m_handlers[26] = [this](std::shared_ptr<Connection> c, const json& j) {
         queryGroupHistory(c, j);
-    };
-    m_handlers[27] = [this](std::shared_ptr<Connection> c, const json& j) {
-        pullFile(c, j);
     };
     // 任务队列取出调用
     m_db_thread = std::thread([this] {
@@ -594,7 +590,6 @@ void ChatService::oneChat(std::shared_ptr<Connection> conn, const json& js) {
                 conn, R"({"type":13,"code":0,"msg":"消息发送失败"})");
             return;
         }
-        saveFile(file_id, content, js["file_data"]);
         content = std::to_string(file_id) + "_" + content;
         m_message_model.updateContent(file_id, content);
     }
@@ -617,8 +612,11 @@ void ChatService::oneChat(std::shared_ptr<Connection> conn, const json& js) {
         }
     }
     m_redis.lpush("msg", response.dump());
-    conn->getReactor()->handleWrite(conn,
-                                    R"({"type":13,"code":1,"msg":"发送成功"})");
+    json sender_rsp;
+    sender_rsp["type"] = 13;
+    sender_rsp["code"] = 1;
+    sender_rsp["msg"] = content;
+    conn->getReactor()->handleWrite(conn, sender_rsp.dump());
     if (friend_conn) {
         friend_conn->getReactor()->post([friend_conn, data = response.dump()] {
             friend_conn->sendData(data + '\n');
@@ -1001,7 +999,6 @@ void ChatService::groupChat(std::shared_ptr<Connection> conn, const json& js) {
                 conn, R"({"type":25,"code":0,"msg":"消息发送失败"})");
             return;
         }
-        saveFile(file_id, content, js["file_data"]);
         content = std::to_string(file_id) + "_" + content;
         m_message_model.updateContent(file_id, content);
     }
@@ -1040,8 +1037,11 @@ void ChatService::groupChat(std::shared_ptr<Connection> conn, const json& js) {
                           response.dump());
         }
     }
-    conn->getReactor()->handleWrite(conn,
-                                    R"({"type":25,"code":1,"msg":"发送成功"})");
+    json sender_rsp;
+    sender_rsp["type"] = 25;
+    sender_rsp["code"] = 1;
+    sender_rsp["msg"] = content;
+    conn->getReactor()->handleWrite(conn, sender_rsp.dump());
     if (m_redis.getLen() > 1000) {
         {
             std::lock_guard<std::mutex> lk(m_db_mtx);
@@ -1077,100 +1077,6 @@ void ChatService::queryGroupHistory(std::shared_ptr<Connection> conn,
         });
     }
     m_db_cv.notify_one();
-}
-
-void ChatService::pullFile(std::shared_ptr<Connection> conn, const json& js) {
-    std::string file_name = basename(js["msg"]);
-    if (file_name.empty() || file_name == "." || file_name == "..") {
-        json response;
-        response["type"] = 27;
-        response["code"] = 0;
-        response["msg"] = "文件不存在";
-        conn->getReactor()->handleWrite(conn, response.dump());
-        return;
-    }
-    std::string path = "./files/" + file_name;
-    std::ifstream ifs(path, std::ios::binary);
-    if (!ifs) {
-        json response;
-        response["type"] = 27;
-        response["code"] = 0;
-        response["msg"] = "文件不存在";
-        conn->getReactor()->handleWrite(conn, response.dump());
-        return;
-    }
-    std::string data((std::istreambuf_iterator<char>(ifs)),
-                     std::istreambuf_iterator<char>());
-    json response;
-    response["type"] = 27;
-    response["code"] = 1;
-    response["msg"] = file_name;
-    response["file_data"] = base64Encode(data);
-    conn->getReactor()->handleWrite(conn, response.dump());
-}
-
-void ChatService::saveFile(int message_id,
-                           const std::string& file_name,
-                           const std::string& file_data) {
-    std::string name = basename(file_name);
-    if (name.empty() || name == "." || name == "..") {
-        return;
-    }
-    std::string path = "./files/" + std::to_string(message_id) + "_" + name;
-    std::ofstream ofs(path, std::ios::binary);
-    std::string decoded = base64Decode(file_data);
-    ofs.write(decoded.data(), decoded.size());
-}
-
-std::string ChatService::basename(const std::string& path) {
-    size_t pos = path.find_last_of('/');
-    return (pos == std::string::npos) ? path : path.substr(pos + 1);
-}
-
-std::string ChatService::base64Encode(const std::string& data) {
-    static const char* table =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string encoded;
-    int val = 0, bits = -6;
-    for (unsigned char c : data) {
-        val = (val << 8) + c;
-        bits += 8;
-        while (bits >= 0) {
-            encoded.push_back(table[(val >> bits) & 0x3F]);
-            bits -= 6;
-        }
-    }
-    if (bits > -6) {
-        encoded.push_back(table[((val << 8) >> (bits + 8)) & 0x3F]);
-    }
-    while (encoded.size() % 4) {
-        encoded.push_back('=');
-    }
-    return encoded;
-}
-
-std::string ChatService::base64Decode(const std::string& encoded) {
-    static const char* table =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    int decode_table[256] = {};
-    for (int i = 0; i < 64; i++) {
-        decode_table[static_cast<int>(table[i])] = i;
-    }
-    std::string decoded;
-    int val = 0, bits = -8;
-    for (unsigned char c : encoded) {
-        if (c == '=')
-            break;
-        if (decode_table[c] == 0 && c != 'A')
-            continue;
-        val = (val << 6) + decode_table[c];
-        bits += 6;
-        if (bits >= 0) {
-            decoded.push_back(static_cast<char>((val >> bits) & 0xFF));
-            bits -= 8;
-        }
-    }
-    return decoded;
 }
 
 std::string ChatService::sha256(const std::string& input) {

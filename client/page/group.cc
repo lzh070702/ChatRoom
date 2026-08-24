@@ -6,6 +6,7 @@
 
 #include "friend.h"
 #include "net/TcpClient.h"
+#include "net/filetransfer.h"
 
 void groupPage(TcpClient& client) {
     while (g_running) {
@@ -498,7 +499,16 @@ void viewGroupHistory(TcpClient& client, const json& g) {
     popIpt();
 }
 
-void uploadGroupFile(TcpClient& client, int group_id, const std::string& path) {
+void uploadGroupFile(TcpClient& client, int group_id, const std::string& arg) {
+    // 解析：续传形式为 "<ref> <路径>"，否则整个当作本地路径
+    std::string ref;
+    std::string path = arg;
+    size_t sp = arg.find(' ');
+    if (sp != std::string::npos && f_is_ref(arg.substr(0, sp))) {
+        ref = arg.substr(0, sp);
+        path = arg.substr(sp + 1);
+    }
+
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs) {
         pushOpt("\033[A\033[K\033[A");
@@ -506,25 +516,37 @@ void uploadGroupFile(TcpClient& client, int group_id, const std::string& path) {
         pushOpt("======================");
         return;
     }
-    std::string data((std::istreambuf_iterator<char>(ifs)),
-                     std::istreambuf_iterator<char>());
+    ifs.close();
     std::string name = path.substr(path.find_last_of('/') + 1);
-    json req;
-    req["type"] = 25;
-    req["rid"] = group_id;
-    req["msg"] = name;
-    req["msg_type"] = true;
-    req["file_data"] = base64Encode(data);
-    client.sendData(req.dump());
-    json rsp = popRsp();
-    if (!g_running) {
-        return;
-    }
-    pushOpt("\033[A\033[K\033[A");
-    if (rsp["code"] != 1) {
-        pushOpt(RED + std::string(rsp["msg"]) + RESET);
+
+    if (ref.empty()) {
+        json req;
+        req["type"] = 25;
+        req["rid"] = group_id;
+        req["msg"] = name;
+        req["msg_type"] = true;
+        client.sendData(req.dump());
+        json rsp = popRsp();
+        if (!g_running) {
+            return;
+        }
+        pushOpt("\033[A\033[K\033[A");
+        if (rsp["code"] != 1) {
+            pushOpt(RED + std::string(rsp["msg"]) + RESET);
+            pushOpt("======================");
+            return;
+        }
+        ref = std::string(rsp["msg"]);
     } else {
+        pushOpt("\033[A\033[K\033[A");
+    }
+
+    int status = f_upload(g_host, ref, path);
+    if (status == 0) {
         pushOpt(GREEN + std::string("文件已发送") + RESET);
+    } else {
+        pushOpt(RED + std::string("文件上传失败，续传: /put ") + ref + " " + path +
+                RESET);
     }
     pushOpt("======================");
 }

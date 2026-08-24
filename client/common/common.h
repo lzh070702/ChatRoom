@@ -36,6 +36,7 @@ extern std::atomic<bool> g_is_getline;
 extern std::atomic<int> g_chat;
 extern json g_user;
 extern TcpClient* g_client;
+extern std::string g_host;
 
 // UI 工具
 void printOpt();
@@ -49,7 +50,3 @@ void setPrompt(const std::string& prompt);
 void setPrefix(const std::string& prefix);
 void showTip(const std::string& msg);
 bool confirm(const std::string& msg);
-
-// 编解码
-std::string base64Encode(const std::string& data);
-std::string base64Decode(const std::string& encoded);

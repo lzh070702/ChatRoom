@@ -32,6 +32,7 @@ std::atomic<int> g_chat = 0;
 
 json g_user;
 TcpClient* g_client = nullptr;
+std::string g_host;
 
 void printOpt() {
     auto msgs = popOpt();
@@ -143,52 +144,4 @@ bool confirm(const std::string& msg) {
         pushOpt("\033[A\033[K请选择:");
     }
     return false;
-}
-
-std::string base64Encode(const std::string& data) {
-    static const char* table =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string encoded;
-    int val = 0, bits = -6;
-    for (unsigned char c : data) {
-        val = (val << 8) + c;
-        bits += 8;
-        while (bits >= 0) {
-            encoded.push_back(table[(val >> bits) & 0x3F]);
-            bits -= 6;
-        }
-    }
-    if (bits > -6) {
-        encoded.push_back(table[((val << 8) >> (bits + 8)) & 0x3F]);
-    }
-    while (encoded.size() % 4) {
-        encoded.push_back('=');
-    }
-    return encoded;
-}
-
-std::string base64Decode(const std::string& encoded) {
-    static const char* table =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    int decode_table[256] = {};
-    for (int i = 0; i < 64; i++) {
-        decode_table[static_cast<int>(table[i])] = i;
-    }
-    std::string decoded;
-    int val = 0, bits = -8;
-    for (unsigned char c : encoded) {
-        if (c == '=') {
-            break;
-        }
-        if (decode_table[c] == 0 && c != 'A') {
-            continue;
-        }
-        val = (val << 6) + decode_table[c];
-        bits += 6;
-        if (bits >= 0) {
-            decoded.push_back(static_cast<char>((val >> bits) & 0xFF));
-            bits -= 8;
-        }
-    }
-    return decoded;
 }

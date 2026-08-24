@@ -10,5 +10,5 @@ void friendMenu(TcpClient& client, const json& f);
 void onechat(TcpClient& client, const json& f);
 void showHistory(TcpClient& client, const json& f, int scope);
 void viewHistory(TcpClient& client, const json& f);
-void uploadFile(TcpClient& client, int id, const std::string& path);
+void uploadFile(TcpClient& client, int id, const std::string& arg);
 void downloadFile(TcpClient& client, const std::string& ref);

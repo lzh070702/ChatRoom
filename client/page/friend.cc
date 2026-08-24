@@ -1,11 +1,14 @@
 #include "friend.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <sys/stat.h>
 
 #include "group.h"
 #include "net/TcpClient.h"
+#include "net/filetransfer.h"
 #include "settings.h"
 
 void home(TcpClient& client) {
@@ -340,7 +343,16 @@ void viewHistory(TcpClient& client, const json& f) {
     popIpt();
 }
 
-void uploadFile(TcpClient& client, int id, const std::string& path) {
+void uploadFile(TcpClient& client, int id, const std::string& arg) {
+    // 解析：续传形式为 "<ref> <路径>"，否则整个当作本地路径
+    std::string ref;
+    std::string path = arg;
+    size_t sp = arg.find(' ');
+    if (sp != std::string::npos && f_is_ref(arg.substr(0, sp))) {
+        ref = arg.substr(0, sp);
+        path = arg.substr(sp + 1);
+    }
+
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs) {
         pushOpt("\033[A\033[K\033[A");
@@ -348,49 +360,77 @@ void uploadFile(TcpClient& client, int id, const std::string& path) {
         pushOpt("======================");
         return;
     }
-    std::string data((std::istreambuf_iterator<char>(ifs)),
-                     std::istreambuf_iterator<char>());
+    ifs.close();
     std::string name = path.substr(path.find_last_of('/') + 1);
-    json req;
-    req["type"] = 13;
-    req["rid"] = id;
-    req["msg"] = name;
-    req["msg_type"] = true;
-    req["file_data"] = base64Encode(data);
-    client.sendData(req.dump());
-    json rsp = popRsp();
-    if (!g_running) {
-        return;
-    }
-    pushOpt("\033[A\033[K\033[A");
-    if (rsp["code"] != 1) {
-        pushOpt(RED + std::string(rsp["msg"]) + RESET);
+
+    if (ref.empty()) {
+        json req;
+        req["type"] = 13;
+        req["rid"] = id;
+        req["msg"] = name;
+        req["msg_type"] = true;
+        client.sendData(req.dump());
+        json rsp = popRsp();
+        if (!g_running) {
+            return;
+        }
+        pushOpt("\033[A\033[K\033[A");
+        if (rsp["code"] != 1) {
+            pushOpt(RED + std::string(rsp["msg"]) + RESET);
+            pushOpt("======================");
+            return;
+        }
+        ref = std::string(rsp["msg"]);
     } else {
+        pushOpt("\033[A\033[K\033[A");
+    }
+
+    int status = f_upload(g_host, ref, path);
+    if (status == 0) {
         pushOpt(GREEN + std::string("文件已发送") + RESET);
+    } else {
+        pushOpt(RED + std::string("文件上传失败，续传: /put ") + ref + " " + path +
+                RESET);
     }
     pushOpt("======================");
 }
 
 void downloadFile(TcpClient& client, const std::string& ref) {
-    json req;
-    req["type"] = 27;
-    req["msg"] = ref;
-    client.sendData(req.dump());
-    json rsp = popRsp();
-    if (!g_running) {
-        return;
-    }
-    if (rsp["code"] != 1) {
-        pushOpt("\033[A\033[K\033[A");
-        pushOpt(RED + std::string(rsp["msg"]) + RESET);
-        pushOpt("======================");
-        return;
-    }
     std::string name = ref;
-    std::string data = base64Decode(std::string(rsp["file_data"]));
-    std::ofstream ofs("./downloads/" + name, std::ios::binary);
-    ofs.write(data.data(), data.size());
+    size_t pos = ref.find('_');
+    if (pos != std::string::npos) {
+        name = ref.substr(pos + 1);
+    }
+    std::string part = "./downloads/" + name + ".part";
+    std::string final = "./downloads/" + name;
+
+    uint64_t offset = 0;
+    struct stat st;
+    if (stat(part.c_str(), &st) == 0) {
+        offset = static_cast<uint64_t>(st.st_size);
+    }
+
+    std::string data;
+    int status = f_download(g_host, ref, offset, data);
+
     pushOpt("\033[A\033[K\033[A");
-    pushOpt(GREEN + std::string("文件已保存为: downloads/") + name + RESET);
+    if (status == 1) {
+        pushOpt(RED + std::string("文件不存在") + RESET);
+    } else {
+        // 追加本次收到的字节（含中断时已收到的部分），供下次 /get 续传
+        std::ofstream ofs(part, std::ios::binary | std::ios::app);
+        ofs.write(data.data(), static_cast<std::streamsize>(data.size()));
+        ofs.close();
+        if (status == 0) {
+            if (std::rename(part.c_str(), final.c_str()) != 0) {
+                pushOpt(RED + std::string("文件保存失败") + RESET);
+            } else {
+                pushOpt(GREEN + std::string("文件已保存为: downloads/") + name +
+                        RESET);
+            }
+        } else {
+            pushOpt(RED + std::string("文件下载中断，重新 /get 续传") + RESET);
+        }
+    }
     pushOpt("======================");
 }

@@ -63,16 +63,9 @@ class ChatService {
     void dissolveGroup(std::shared_ptr<Connection> conn, const json& js);
     void groupChat(std::shared_ptr<Connection> conn, const json& js);
     void queryGroupHistory(std::shared_ptr<Connection> conn, const json& js);
-    void pullFile(std::shared_ptr<Connection> conn, const json& js);
 
     void flushMsgList();
 
-    std::string base64Encode(const std::string& data);
-    std::string base64Decode(const std::string& encoded);
-    void saveFile(int message_id,
-                  const std::string& file_name,
-                  const std::string& file_data);
-    std::string basename(const std::string& path);
     std::string sha256(const std::string& input);
 
    private:

@@ -7,8 +7,8 @@ MessageModel::MessageModel(MySQLPool* pool) {
 int MessageModel::insertFile(const std::string& file) {
     std::string sql =
         "INSERT INTO file(file) "
-        "VALUES(" +
-        m_mysql.escape(file) + ");";
+        "VALUES('" +
+        m_mysql.escape(file) + "');";
     return m_mysql.updateAndGetId(sql);
 }
 

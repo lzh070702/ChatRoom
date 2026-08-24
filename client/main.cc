@@ -19,6 +19,7 @@ int main(int argc, char* argv[]) {
     mkdir("./downloads", 0755);
     string host = (argc > 1) ? argv[1] : "127.0.0.1";
     int port = (argc > 2) ? stoi(argv[2]) : 8000;
+    g_host = host;
     TcpClient client;
     g_client = &client;
     if (!client.connectServer(host, port)) {
