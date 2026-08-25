@@ -1,10 +1,10 @@
 #include "friend.h"
 
+#include <sys/stat.h>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
-#include <sys/stat.h>
 
 #include "group.h"
 #include "net/TcpClient.h"
@@ -291,15 +291,6 @@ void onechat(TcpClient& client, const json& f) {
         req["msg"] = input;
         req["msg_type"] = false;
         client.sendData(req.dump());
-        json rsp = popRsp();
-        if (!g_running) {
-            break;
-        }
-        if (rsp["code"] != 1) {
-            pushOpt("\033[A\033[K");
-            pushOpt(RED + std::string(rsp["msg"]) + RESET);
-            pushOpt("======================");
-        }
     }
     g_chat = 0;
 }
@@ -352,7 +343,6 @@ void uploadFile(TcpClient& client, int id, const std::string& arg) {
         ref = arg.substr(0, sp);
         path = arg.substr(sp + 1);
     }
-
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs) {
         pushOpt("\033[A\033[K\033[A");
@@ -362,7 +352,6 @@ void uploadFile(TcpClient& client, int id, const std::string& arg) {
     }
     ifs.close();
     std::string name = path.substr(path.find_last_of('/') + 1);
-
     if (ref.empty()) {
         json req;
         req["type"] = 13;
@@ -374,23 +363,18 @@ void uploadFile(TcpClient& client, int id, const std::string& arg) {
         if (!g_running) {
             return;
         }
-        pushOpt("\033[A\033[K\033[A");
-        if (rsp["code"] != 1) {
-            pushOpt(RED + std::string(rsp["msg"]) + RESET);
-            pushOpt("======================");
+        if (rsp["code"] != 4) {
             return;
         }
         ref = std::string(rsp["msg"]);
-    } else {
-        pushOpt("\033[A\033[K\033[A");
     }
-
+    pushOpt("\033[A\033[K\033[A");
     int status = f_upload(g_host, ref, path);
     if (status == 0) {
         pushOpt(GREEN + std::string("文件已发送") + RESET);
     } else {
-        pushOpt(RED + std::string("文件上传失败，续传: /put ") + ref + " " + path +
-                RESET);
+        pushOpt(RED + std::string("文件上传失败，续传: /put ") + ref + " " +
+                path + RESET);
     }
     pushOpt("======================");
 }

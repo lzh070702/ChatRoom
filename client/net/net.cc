@@ -249,5 +249,15 @@ void parseOpt(const std::string& msg,
         pushOpt(opt);
         return;
     }
+    if (js["type"] == 13 || js["type"] == 25) {
+        if (js["code"] == 0) {
+            pushOpt("\033[A\033[K\033[A\033[K\033[A");
+            pushOpt(RED + std::string(js["msg"]) + RESET);
+            pushOpt("======================");
+            return;
+        } else if (js["code"] == 1) {
+            return;
+        }
+    }
     pushRsp(js);
 }

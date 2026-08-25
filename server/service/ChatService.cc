@@ -548,88 +548,83 @@ void ChatService::deleteFriend(std::shared_ptr<Connection> conn,
         conn, R"({"type":12,"code":1,"msg":"成功删除该好友"})");
 }
 
-void ChatService::flushMsgList() {
-    std::vector<std::string> msgs;
-    while (true) {
-        std::string msg;
-        if (!m_redis.rpop("msg", msg)) {
-            break;
-        }
-        msgs.push_back(std::move(msg));
-    }
-    if (!msgs.empty()) {
-        m_message_model.insertBatch(msgs);
-    }
-}
-
 void ChatService::oneChat(std::shared_ptr<Connection> conn, const json& js) {
     int rid = js["rid"];
     int sid = conn->getUserId();
     bool is_file = js["msg_type"];
     std::string content = js["msg"];
     User user;
-    if (!m_user_model.queryById(rid, user)) {
-        conn->getReactor()->handleWrite(
-            conn, R"({"type":13,"code":0,"msg":"该用户已注销"})");
-        return;
-    }
-    if (m_friend_model.isFriend(sid, rid) < 2) {
-        conn->getReactor()->handleWrite(
-            conn, R"({"type":13,"code":0,"msg":"不是好友，无法聊天"})");
-        return;
-    }
-    if (m_friend_model.isFriend(rid, sid) == 3) {
-        conn->getReactor()->handleWrite(
-            conn, R"({"type":13,"code":0,"msg":"已被对方拉黑"})");
+    while (true) {
+        if (!m_user_model.queryById(rid, user)) {
+            conn->getReactor()->handleWrite(
+                conn, R"({"type":13,"code":0,"msg":"该用户已注销"})");
+            break;
+        }
+        if (m_friend_model.isFriend(sid, rid) < 2) {
+            conn->getReactor()->handleWrite(
+                conn, R"({"type":13,"code":0,"msg":"不是好友，无法聊天"})");
+            break;
+        }
+        if (m_friend_model.isFriend(rid, sid) == 3) {
+            conn->getReactor()->handleWrite(
+                conn, R"({"type":13,"code":0,"msg":"已被对方拉黑"})");
+            break;
+        }
+        if (is_file) {
+            int file_id = m_message_model.insertFile(content);
+            if (file_id == -1) {
+                conn->getReactor()->handleWrite(
+                    conn, R"({"type":13,"code":0,"msg":"消息发送失败"})");
+                break;
+            }
+            content = std::to_string(file_id) + "_" + content;
+            m_message_model.updateContent(file_id, content);
+        }
+        User sender;
+        m_user_model.queryById(sid, sender);
+        json response;
+        response["type"] = 13;
+        response["code"] = 2;
+        response["sid"] = sid;
+        response["rid"] = rid;
+        response["name"] = sender.getName();
+        response["msg"] = content;
+        response["msg_type"] = js["msg_type"];
+        std::shared_ptr<Connection> friend_conn;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            auto it = m_user_conn.find(rid);
+            if (it != m_user_conn.end()) {
+                friend_conn = it->second.lock();
+            }
+        }
+        m_redis.lpush("msg", response.dump());
+        if (friend_conn) {
+            friend_conn->getReactor()->post(
+                [friend_conn, data = response.dump()] {
+                    friend_conn->sendData(data + '\n');
+                });
+        } else {
+            m_redis.lpush("offline_msg:" + std::to_string(rid),
+                          response.dump());
+        }
+        json sender_rsp;
+        sender_rsp["type"] = 13;
+        sender_rsp["code"] = is_file ? 4 : 1;
+        sender_rsp["msg"] = content;
+        conn->getReactor()->handleWrite(conn, sender_rsp.dump());
+        if (m_redis.getLen() > 1000) {
+            {
+                std::lock_guard<std::mutex> lk(m_db_mtx);
+                m_db_tasks.push_back([this] { flushMsgList(); });
+            }
+            m_db_cv.notify_one();
+        }
         return;
     }
     if (is_file) {
-        int file_id = m_message_model.insertFile(content);
-        if (file_id == -1) {
-            conn->getReactor()->handleWrite(
-                conn, R"({"type":13,"code":0,"msg":"消息发送失败"})");
-            return;
-        }
-        content = std::to_string(file_id) + "_" + content;
-        m_message_model.updateContent(file_id, content);
-    }
-    User sender;
-    m_user_model.queryById(sid, sender);
-    json response;
-    response["type"] = 13;
-    response["code"] = 2;
-    response["sid"] = sid;
-    response["rid"] = rid;
-    response["name"] = sender.getName();
-    response["msg"] = content;
-    response["msg_type"] = js["msg_type"];
-    std::shared_ptr<Connection> friend_conn;
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        auto it = m_user_conn.find(rid);
-        if (it != m_user_conn.end()) {
-            friend_conn = it->second.lock();
-        }
-    }
-    m_redis.lpush("msg", response.dump());
-    json sender_rsp;
-    sender_rsp["type"] = 13;
-    sender_rsp["code"] = 1;
-    sender_rsp["msg"] = content;
-    conn->getReactor()->handleWrite(conn, sender_rsp.dump());
-    if (friend_conn) {
-        friend_conn->getReactor()->post([friend_conn, data = response.dump()] {
-            friend_conn->sendData(data + '\n');
-        });
-    } else {
-        m_redis.lpush("offline_msg:" + std::to_string(rid), response.dump());
-    }
-    if (m_redis.getLen() > 1000) {
-        {
-            std::lock_guard<std::mutex> lk(m_db_mtx);
-            m_db_tasks.push_back([this] { flushMsgList(); });
-        }
-        m_db_cv.notify_one();
+        conn->getReactor()->handleWrite(conn,
+                                        R"({"type":13,"code":3,"msg":""})");
     }
 }
 
@@ -987,67 +982,74 @@ void ChatService::groupChat(std::shared_ptr<Connection> conn, const json& js) {
     int sid = conn->getUserId();
     bool is_file = js["msg_type"];
     std::string content = js["msg"];
-    if (m_group_model.getRole(rid, sid) <= 0) {
-        conn->getReactor()->handleWrite(
-            conn, R"({"type":25,"code":0,"msg":"不在该群中"})");
+    while (true) {
+        if (m_group_model.getRole(rid, sid) <= 0) {
+            conn->getReactor()->handleWrite(
+                conn, R"({"type":25,"code":0,"msg":"不在该群中"})");
+            break;
+        }
+        if (is_file) {
+            int file_id = m_message_model.insertFile(content);
+            if (file_id == -1) {
+                conn->getReactor()->handleWrite(
+                    conn, R"({"type":25,"code":0,"msg":"消息发送失败"})");
+                break;
+            }
+            content = std::to_string(file_id) + "_" + content;
+            m_message_model.updateContent(file_id, content);
+        }
+        User sender;
+        m_user_model.queryById(sid, sender);
+        auto members = m_group_model.queryMembers(rid);
+        json response;
+        response["type"] = 25;
+        response["code"] = 2;
+        response["sid"] = sid;
+        response["rid"] = rid;
+        response["name"] = sender.getName();
+        response["group_name"] = m_group_model.getGroupName(rid);
+        response["msg"] = content;
+        response["msg_type"] = js["msg_type"];
+        m_redis.lpush("msg", response.dump());
+        for (auto& [member_id, role] : members) {
+            if (member_id == sid) {
+                continue;
+            }
+            std::shared_ptr<Connection> member_conn;
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                auto it = m_user_conn.find(member_id);
+                if (it != m_user_conn.end()) {
+                    member_conn = it->second.lock();
+                }
+            }
+            if (member_conn) {
+                member_conn->getReactor()->post(
+                    [member_conn, data = response.dump()] {
+                        member_conn->sendData(data + '\n');
+                    });
+            } else {
+                m_redis.lpush("offline_group_msg:" + std::to_string(member_id),
+                              response.dump());
+            }
+        }
+        json sender_rsp;
+        sender_rsp["type"] = 25;
+        sender_rsp["code"] = is_file ? 4 : 1;
+        sender_rsp["msg"] = content;
+        conn->getReactor()->handleWrite(conn, sender_rsp.dump());
+        if (m_redis.getLen() > 1000) {
+            {
+                std::lock_guard<std::mutex> lk(m_db_mtx);
+                m_db_tasks.push_back([this] { flushMsgList(); });
+            }
+            m_db_cv.notify_one();
+        }
         return;
     }
     if (is_file) {
-        int file_id = m_message_model.insertFile(content);
-        if (file_id == -1) {
-            conn->getReactor()->handleWrite(
-                conn, R"({"type":25,"code":0,"msg":"消息发送失败"})");
-            return;
-        }
-        content = std::to_string(file_id) + "_" + content;
-        m_message_model.updateContent(file_id, content);
-    }
-    User sender;
-    m_user_model.queryById(sid, sender);
-    auto members = m_group_model.queryMembers(rid);
-    json response;
-    response["type"] = 25;
-    response["code"] = 2;
-    response["sid"] = sid;
-    response["rid"] = rid;
-    response["name"] = sender.getName();
-    response["group_name"] = m_group_model.getGroupName(rid);
-    response["msg"] = content;
-    response["msg_type"] = js["msg_type"];
-    m_redis.lpush("msg", response.dump());
-    for (auto& [member_id, role] : members) {
-        if (member_id == sid) {
-            continue;
-        }
-        std::shared_ptr<Connection> member_conn;
-        {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            auto it = m_user_conn.find(member_id);
-            if (it != m_user_conn.end()) {
-                member_conn = it->second.lock();
-            }
-        }
-        if (member_conn) {
-            member_conn->getReactor()->post(
-                [member_conn, data = response.dump()] {
-                    member_conn->sendData(data + '\n');
-                });
-        } else {
-            m_redis.lpush("offline_group_msg:" + std::to_string(member_id),
-                          response.dump());
-        }
-    }
-    json sender_rsp;
-    sender_rsp["type"] = 25;
-    sender_rsp["code"] = 1;
-    sender_rsp["msg"] = content;
-    conn->getReactor()->handleWrite(conn, sender_rsp.dump());
-    if (m_redis.getLen() > 1000) {
-        {
-            std::lock_guard<std::mutex> lk(m_db_mtx);
-            m_db_tasks.push_back([this] { flushMsgList(); });
-        }
-        m_db_cv.notify_one();
+        conn->getReactor()->handleWrite(conn,
+                                        R"({"type":25,"code":3,"msg":""})");
     }
 }
 
@@ -1077,6 +1079,20 @@ void ChatService::queryGroupHistory(std::shared_ptr<Connection> conn,
         });
     }
     m_db_cv.notify_one();
+}
+
+void ChatService::flushMsgList() {
+    std::vector<std::string> msgs;
+    while (true) {
+        std::string msg;
+        if (!m_redis.rpop("msg", msg)) {
+            break;
+        }
+        msgs.push_back(std::move(msg));
+    }
+    if (!msgs.empty()) {
+        m_message_model.insertBatch(msgs);
+    }
 }
 
 std::string ChatService::sha256(const std::string& input) {
