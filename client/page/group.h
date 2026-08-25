@@ -10,4 +10,3 @@ void groupMenu(TcpClient& client, const json& g);
 void groupChat(TcpClient& client, const json& g);
 void showGroupHistory(TcpClient& client, const json& g, int scope);
 void viewGroupHistory(TcpClient& client, const json& g);
-void uploadGroupFile(TcpClient& client, int group_id, const std::string& arg);

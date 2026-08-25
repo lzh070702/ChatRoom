@@ -40,17 +40,17 @@ void friendPage(TcpClient& client) {
         system("clear");
         pushOpt("──────── 好友 ────────");
         pushOpt("======================");
-        pushOpt("1. 添加好友");
-        pushOpt("2. 好友列表");
+        pushOpt("1. 我的好友");
+        pushOpt("2. 添加好友");
         pushOpt("0. 返回");
         pushOpt("======================");
         setPrompt("请选择:");
         setPrefix("选择:");
         std::string input = popIpt();
         if (input == "1") {
-            addFriend(client);
-        } else if (input == "2") {
             friendList(client);
+        } else if (input == "2") {
+            addFriend(client);
         } else if (input == "0") {
             return;
         }
@@ -278,11 +278,15 @@ void onechat(TcpClient& client, const json& f) {
             break;
         }
         if (input.rfind("/put ", 0) == 0) {
-            uploadFile(client, id, input.substr(5));
+            uploadFile(client, input.substr(5));
             continue;
         }
         if (input.rfind("/get ", 0) == 0) {
             downloadFile(client, input.substr(5));
+            continue;
+        }
+        if (input == "/pending") {
+            pendingFiles(client);
             continue;
         }
         json req;
@@ -334,7 +338,18 @@ void viewHistory(TcpClient& client, const json& f) {
     popIpt();
 }
 
-void uploadFile(TcpClient& client, int id, const std::string& arg) {
+// 文件传输进度：写入 stderr 用 \r 原地刷新，避免与 readline 主界面互相干扰
+static void showProgress(uint64_t done, uint64_t total) {
+    int pct = (total == 0) ? 100 : static_cast<int>(done * 100 / total);
+    fprintf(stderr, "\r\033[K(%llu/%llu) %d%%",
+            static_cast<unsigned long long>(done),
+            static_cast<unsigned long long>(total), pct);
+    fflush(stderr);
+}
+
+void uploadFile(TcpClient& client, const std::string& arg) {
+    int type = (g_chat % 2 == 0) ? 13 : 25;
+    int rid = g_chat / 2;
     // 解析：续传形式为 "<ref> <路径>"，否则整个当作本地路径
     std::string ref;
     std::string path = arg;
@@ -354,8 +369,8 @@ void uploadFile(TcpClient& client, int id, const std::string& arg) {
     std::string name = path.substr(path.find_last_of('/') + 1);
     if (ref.empty()) {
         json req;
-        req["type"] = 13;
-        req["rid"] = id;
+        req["type"] = type;
+        req["rid"] = rid;
         req["msg"] = name;
         req["msg_type"] = true;
         client.sendData(req.dump());
@@ -368,8 +383,11 @@ void uploadFile(TcpClient& client, int id, const std::string& arg) {
         }
         ref = std::string(rsp["msg"]);
     }
+    pushOpt("\033[A\033[K\033[A\033[K\033[A\033[K\033[A");
+    pushOpt("我: [文件] " + ref);
+    int status = f_upload(g_host, ref, path, showProgress);
+    fprintf(stderr, "\n");
     pushOpt("\033[A\033[K\033[A");
-    int status = f_upload(g_host, ref, path);
     if (status == 0) {
         pushOpt(GREEN + std::string("文件已发送") + RESET);
     } else {
@@ -387,16 +405,16 @@ void downloadFile(TcpClient& client, const std::string& ref) {
     }
     std::string part = "./downloads/" + name + ".part";
     std::string final = "./downloads/" + name;
-
     uint64_t offset = 0;
     struct stat st;
     if (stat(part.c_str(), &st) == 0) {
         offset = static_cast<uint64_t>(st.st_size);
     }
-
+    pushOpt("\033[A\033[K\033[A\033[K\033[A\033[K\033[A");
+    pushOpt(GREEN "正在下载文件: " + ref + RESET);
     std::string data;
-    int status = f_download(g_host, ref, offset, data);
-
+    int status = f_download(g_host, ref, offset, data, showProgress);
+    fprintf(stderr, "\n");
     pushOpt("\033[A\033[K\033[A");
     if (status == 1) {
         pushOpt(RED + std::string("文件不存在") + RESET);
@@ -415,6 +433,47 @@ void downloadFile(TcpClient& client, const std::string& ref) {
         } else {
             pushOpt(RED + std::string("文件下载中断，重新 /get 续传") + RESET);
         }
+    }
+    pushOpt("======================");
+}
+
+void pendingFiles(TcpClient& client) {
+    int rid = g_chat / 2;
+    bool is_group = (g_chat % 2 == 1);
+    json req;
+    req["type"] = 27;
+    req["rid"] = rid;
+    req["is_group"] = is_group;
+    client.sendData(req.dump());
+    json rsp = popRsp();
+    if (!g_running) {
+        return;
+    }
+    pushOpt("\033[A\033[K\033[A\033[K\033[A");
+    if (rsp["code"] != 1) {
+        pushOpt(RED + std::string(rsp["msg"]) + RESET);
+        pushOpt("======================");
+        return;
+    }
+    bool any = false;
+    for (auto& f : rsp["msg"]) {
+        std::string name = f["name"];
+        std::string ref = f["ref"];
+        if (f["upload_pending"].get<bool>()) {
+            any = true;
+            pushOpt(YELLOW + std::string("上传未完成: ") + name +
+                    std::string("  →  /put ") + ref + " <路径>" + RESET);
+        }
+        std::string part = "./downloads/" + name + ".part";
+        struct stat st;
+        if (stat(part.c_str(), &st) == 0) {
+            any = true;
+            pushOpt(YELLOW + std::string("下载未完成: ") + name +
+                    std::string("  →  /get ") + ref + RESET);
+        }
+    }
+    if (!any) {
+        pushOpt(GREEN + std::string("当前聊天无未完成的文件传输") + RESET);
     }
     pushOpt("======================");
 }

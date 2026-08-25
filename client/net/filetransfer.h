@@ -18,6 +18,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <string>
 
 constexpr uint16_t FILE_PORT = 8001;
@@ -28,8 +29,11 @@ constexpr uint8_t CMD_DOWNLOAD = 2;
 constexpr uint8_t STATUS_OK = 0;
 constexpr uint8_t STATUS_NOT_FOUND = 1;
 constexpr size_t FILE_HEADER_SIZE = 28;
-constexpr size_t FILE_RESP_SIZE = 16;
-constexpr uint64_t FILE_SENDFILE_CHUNK = 1ULL << 30;  // 单次 sendfile 上限 1GiB
+constexpr size_t FILE_RESP_SIZE = 24;
+constexpr uint64_t FILE_SENDFILE_CHUNK = 1ULL << 20;  // 单次 sendfile 1MiB，兼顾进度粒度
+
+// 进度回调：(已完成字节, 总字节)
+using f_progress = std::function<void(uint64_t, uint64_t)>;
 
 inline void f_store_be32(char* p, uint32_t v) {
     uint32_t n = htobe32(v);
@@ -111,7 +115,8 @@ inline bool f_is_ref(const std::string& s) {
 // 上传文件；返回 status（0=OK），-1 表示连接/IO 失败。
 // 用 sendfile 零拷贝直发；续传偏移由服务端 .meta 决定（ack 里返回），客户端从该偏移继续发。
 inline int f_upload(const std::string& host, const std::string& ref,
-                    const std::string& path) {
+                    const std::string& path,
+                    const f_progress& progress = nullptr) {
     struct stat st;
     if (stat(path.c_str(), &st) != 0) {
         return -1;
@@ -161,12 +166,27 @@ inline int f_upload(const std::string& host, const std::string& ref,
 
     off_t off = static_cast<off_t>(resume);
     uint64_t remaining = file_size - resume;
+
+    int last_pct = -1;
+    auto report = [&](uint64_t done) {
+        if (!progress || file_size == 0) {
+            return;
+        }
+        int pct = static_cast<int>(done * 100 / file_size);
+        if (pct != last_pct) {
+            last_pct = pct;
+            progress(done, file_size);
+        }
+    };
+    report(static_cast<uint64_t>(off));
+
     while (remaining > 0) {
         size_t count = static_cast<size_t>(
             std::min<uint64_t>(remaining, FILE_SENDFILE_CHUNK));
         ssize_t n = sendfile(fd, file_fd, &off, count);
         if (n > 0) {
             remaining -= static_cast<uint64_t>(n);
+            report(static_cast<uint64_t>(off));
         } else if (n == 0) {
             break;
         } else if (errno == EINTR) {
@@ -196,6 +216,7 @@ inline int f_upload(const std::string& host, const std::string& ref,
                 }
                 remaining -= static_cast<uint64_t>(rd);
                 off += rd;
+                report(static_cast<uint64_t>(off));
             }
             break;
         } else {
@@ -204,6 +225,7 @@ inline int f_upload(const std::string& host, const std::string& ref,
             return -1;
         }
     }
+    report(file_size);
     close(file_fd);
     close(fd);
     return STATUS_OK;
@@ -212,7 +234,8 @@ inline int f_upload(const std::string& host, const std::string& ref,
 // 下载文件；offset 为本地已下字节（断点续传）。返回 status（0=OK，1=不存在），
 // -1 表示连接/IO 失败，data 填本次收到的字节。
 inline int f_download(const std::string& host, const std::string& ref,
-                      uint64_t offset, std::string& data) {
+                      uint64_t offset, std::string& data,
+                      const f_progress& progress = nullptr) {
     int fd = f_connect(host, FILE_PORT);
     if (fd < 0) {
         return -1;
@@ -245,6 +268,20 @@ inline int f_download(const std::string& host, const std::string& ref,
         close(fd);
         return status;
     }
+    uint64_t total = f_load_be64(r + 16);
+
+    int last_pct = -1;
+    auto report = [&](uint64_t done) {
+        if (!progress || total == 0) {
+            return;
+        }
+        int pct = static_cast<int>(done * 100 / total);
+        if (pct != last_pct) {
+            last_pct = pct;
+            progress(done, total);
+        }
+    };
+    report(offset);
 
     data.clear();
     char buf[65536];
@@ -252,6 +289,7 @@ inline int f_download(const std::string& host, const std::string& ref,
         ssize_t n = recv(fd, buf, sizeof(buf), 0);
         if (n > 0) {
             data.append(buf, static_cast<size_t>(n));
+            report(offset + data.size());
         } else if (n == 0) {
             break;  // 服务端发送完毕并关闭
         } else if (errno == EINTR) {
@@ -261,6 +299,7 @@ inline int f_download(const std::string& host, const std::string& ref,
             return -1;
         }
     }
+    report(total);
     close(fd);
     return STATUS_OK;
 }

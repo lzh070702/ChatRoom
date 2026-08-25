@@ -39,7 +39,7 @@ constexpr uint8_t STATUS_BAD_REQ = 2;
 constexpr uint8_t STATUS_IO = 3;
 
 constexpr size_t HEADER_SIZE = 28;
-constexpr size_t RESP_SIZE = 16;
+constexpr size_t RESP_SIZE = 24;
 constexpr uint32_t MAX_FILENAME_LEN = 255;
 constexpr int MAX_EVENTS = 1024;
 constexpr size_t BUF_SIZE = 65536;
@@ -86,10 +86,11 @@ struct RespHeader {
     uint8_t status;
     uint16_t reserved;
     uint64_t offset;
+    uint64_t total_size;
 };
 #pragma pack(pop)
 static_assert(sizeof(FileHeader) == 28, "FileHeader size must be 28");
-static_assert(sizeof(RespHeader) == 16, "RespHeader size must be 16");
+static_assert(sizeof(RespHeader) == 24, "RespHeader size must be 24");
 
 void unpack_header(const char* in, FileHeader& h) {
     std::memcpy(h.magic, in, 4);
@@ -102,13 +103,15 @@ void unpack_header(const char* in, FileHeader& h) {
     h.offset = load_be64(in + 20);
 }
 
-void pack_resp(uint8_t cmd, uint8_t status, uint64_t offset, char* out) {
+void pack_resp(uint8_t cmd, uint8_t status, uint64_t offset, uint64_t total_size,
+               char* out) {
     std::memcpy(out, MAGIC, 4);
     out[4] = static_cast<char>(cmd);
     out[5] = static_cast<char>(status);
     out[6] = 0;
     out[7] = 0;
     store_be64(out + 8, offset);
+    store_be64(out + 16, total_size);
 }
 
 bool valid_header(const FileHeader& h) {
@@ -397,7 +400,7 @@ class FileConn {
         if (sent_ > actual_size_) {
             sent_ = actual_size_;
         }
-        queue_resp(CMD_DOWNLOAD, STATUS_OK, sent_);
+        queue_resp(CMD_DOWNLOAD, STATUS_OK, sent_, actual_size_);
         state_ = State::DOWNLOAD_STREAM;
         if (wbuf_.empty()) {
             return stream_download();
@@ -493,9 +496,10 @@ class FileConn {
         state_ = State::CLOSING;
     }
 
-    void queue_resp(uint8_t cmd, uint8_t status, uint64_t offset) {
+    void queue_resp(uint8_t cmd, uint8_t status, uint64_t offset,
+                    uint64_t total_size = 0) {
         char buf[RESP_SIZE];
-        pack_resp(cmd, status, offset, buf);
+        pack_resp(cmd, status, offset, total_size, buf);
         wbuf_.append(buf, RESP_SIZE);
         if (!flush_out()) {
             arm_out();
@@ -504,8 +508,9 @@ class FileConn {
 
     // 入队响应并进入 CLOSING。返回 true 表示还需排空（保持连接），
     // false 表示响应已发完，可立即关闭。
-    bool close_with_resp(uint8_t cmd, uint8_t status, uint64_t offset) {
-        queue_resp(cmd, status, offset);
+    bool close_with_resp(uint8_t cmd, uint8_t status, uint64_t offset,
+                         uint64_t total_size = 0) {
+        queue_resp(cmd, status, offset, total_size);
         state_ = State::CLOSING;
         return !wbuf_.empty();
     }

@@ -430,11 +430,15 @@ void groupChat(TcpClient& client, const json& g) {
             break;
         }
         if (input.rfind("/put ", 0) == 0) {
-            uploadGroupFile(client, group_id, input.substr(5));
+            uploadFile(client, input.substr(5));
             continue;
         }
         if (input.rfind("/get ", 0) == 0) {
             downloadFile(client, input.substr(5));
+            continue;
+        }
+        if (input == "/pending") {
+            pendingFiles(client);
             continue;
         }
         json req;
@@ -488,49 +492,4 @@ void viewGroupHistory(TcpClient& client, const json& g) {
     setPrompt("（输入任意内容返回）");
     setPrefix("返回:");
     popIpt();
-}
-
-void uploadGroupFile(TcpClient& client, int group_id, const std::string& arg) {
-    // 解析：续传形式为 "<ref> <路径>"，否则整个当作本地路径
-    std::string ref;
-    std::string path = arg;
-    size_t sp = arg.find(' ');
-    if (sp != std::string::npos && f_is_ref(arg.substr(0, sp))) {
-        ref = arg.substr(0, sp);
-        path = arg.substr(sp + 1);
-    }
-    std::ifstream ifs(path, std::ios::binary);
-    if (!ifs) {
-        pushOpt("\033[A\033[K\033[A");
-        pushOpt(RED + std::string("文件不存在: ") + path + RESET);
-        pushOpt("======================");
-        return;
-    }
-    ifs.close();
-    std::string name = path.substr(path.find_last_of('/') + 1);
-    if (ref.empty()) {
-        json req;
-        req["type"] = 25;
-        req["rid"] = group_id;
-        req["msg"] = name;
-        req["msg_type"] = true;
-        client.sendData(req.dump());
-        json rsp = popRsp();
-        if (!g_running) {
-            return;
-        }
-        if (rsp["code"] != 4) {
-            return;
-        }
-        ref = std::string(rsp["msg"]);
-    }
-    pushOpt("\033[A\033[K\033[A");
-    int status = f_upload(g_host, ref, path);
-    if (status == 0) {
-        pushOpt(GREEN + std::string("文件已发送") + RESET);
-    } else {
-        pushOpt(RED + std::string("文件上传失败，续传: /put ") + ref + " " +
-                path + RESET);
-    }
-    pushOpt("======================");
 }

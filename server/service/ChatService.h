@@ -63,6 +63,7 @@ class ChatService {
     void dissolveGroup(std::shared_ptr<Connection> conn, const json& js);
     void groupChat(std::shared_ptr<Connection> conn, const json& js);
     void queryGroupHistory(std::shared_ptr<Connection> conn, const json& js);
+    void pendingFiles(std::shared_ptr<Connection> conn, const json& js);
 
     void flushMsgList();
 

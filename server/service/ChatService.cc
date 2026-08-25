@@ -1,5 +1,6 @@
 #include <glog/logging.h>
 #include <openssl/sha.h>
+#include <sys/stat.h>
 #include <iomanip>
 #include <random>
 #include <sstream>
@@ -129,6 +130,9 @@ ChatService::ChatService()
     };
     m_handlers[26] = [this](std::shared_ptr<Connection> c, const json& j) {
         queryGroupHistory(c, j);
+    };
+    m_handlers[27] = [this](std::shared_ptr<Connection> c, const json& j) {
+        pendingFiles(c, j);
     };
     // 任务队列取出调用
     m_db_thread = std::thread([this] {
@@ -1079,6 +1083,45 @@ void ChatService::queryGroupHistory(std::shared_ptr<Connection> conn,
         });
     }
     m_db_cv.notify_one();
+}
+
+void ChatService::pendingFiles(std::shared_ptr<Connection> conn,
+                               const json& js) {
+    int user_id = conn->getUserId();
+    int rid = js["rid"];
+    bool is_group = js.value("is_group", false);
+    if (is_group && m_group_model.getRole(rid, user_id) <= 0) {
+        conn->getReactor()->handleWrite(
+            conn, R"({"type":27,"code":0,"msg":"不在该群中"})");
+        return;
+    }
+    std::vector<json> history =
+        is_group ? m_message_model.queryGroupHistory(rid, 1)
+                 : m_message_model.queryHistory(user_id, rid, 1);
+    json files = json::array();
+    for (auto& m : history) {
+        if (m["is_file"] != 1) {
+            continue;
+        }
+        std::string ref = m["content"];
+        size_t pos = ref.find('_');
+        std::string name =
+            (pos == std::string::npos) ? ref : ref.substr(pos + 1);
+        struct stat st;
+        bool upload_pending =
+            (stat(("./files/" + ref).c_str(), &st) != 0 &&
+             stat(("./files/" + ref + ".tmp").c_str(), &st) == 0);
+        json f;
+        f["ref"] = ref;
+        f["name"] = name;
+        f["upload_pending"] = upload_pending;
+        files.push_back(f);
+    }
+    json response;
+    response["type"] = 27;
+    response["code"] = 1;
+    response["msg"] = files;
+    conn->getReactor()->handleWrite(conn, response.dump());
 }
 
 void ChatService::flushMsgList() {
