@@ -53,6 +53,7 @@ void changePassword(TcpClient& client) {
         if (!g_running) {
             return;
         }
+        pushOpt("\033[A\033[K\033[A");
         if (rsp["code"] != 1) {
             if (!confirm(RED + std::string(rsp["msg"]) + RESET +
                          "\n是否重新发送？")) {
@@ -60,6 +61,7 @@ void changePassword(TcpClient& client) {
             }
             pushOpt("\033[A\033[K\033[A\033[K\033[A\033[K");
             pushOpt("\033[A\033[K\033[A\033[K\033[A\033[K");
+            pushOpt("\033[A\033[K\033[A\033[K\033[A");
         } else {
             break;
         }
@@ -82,7 +84,8 @@ void changePassword(TcpClient& client) {
                 return;
             }
             pushOpt("\033[A\033[K\033[A\033[K\033[A\033[K");
-            pushOpt("\033[A\033[K\033[A\033[K\033[A\033[K\033[A\033[K");
+            pushOpt("\033[A\033[K\033[A\033[K\033[A\033[K");
+            pushOpt("\033[A\033[K\033[A\033[K\033[A\033[K\033[A");
         } else {
             showTip(GREEN + std::string(rsp["msg"]) + RESET);
             break;

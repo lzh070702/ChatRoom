@@ -347,16 +347,26 @@ static void showProgress(uint64_t done, uint64_t total) {
     fflush(stderr);
 }
 
+static std::string trim(const std::string& s) {
+    size_t b = s.find_first_not_of(" \t");
+    if (b == std::string::npos) {
+        return "";
+    }
+    size_t e = s.find_last_not_of(" \t");
+    return s.substr(b, e - b + 1);
+}
+
 void uploadFile(TcpClient& client, const std::string& arg) {
     int type = (g_chat % 2 == 0) ? 13 : 25;
     int rid = g_chat / 2;
-    // 解析：续传形式为 "<ref> <路径>"，否则整个当作本地路径
+    // 解析：续传形式为 "<ref> <路径>"，否则整个当作本地路径；容忍多余空格
+    std::string s = trim(arg);
     std::string ref;
-    std::string path = arg;
-    size_t sp = arg.find(' ');
-    if (sp != std::string::npos && f_is_ref(arg.substr(0, sp))) {
-        ref = arg.substr(0, sp);
-        path = arg.substr(sp + 1);
+    std::string path = s;
+    size_t sp = s.find_first_of(" \t");
+    if (sp != std::string::npos && f_is_ref(s.substr(0, sp))) {
+        ref = s.substr(0, sp);
+        path = trim(s.substr(sp + 1));
     }
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs) {
@@ -398,10 +408,11 @@ void uploadFile(TcpClient& client, const std::string& arg) {
 }
 
 void downloadFile(TcpClient& client, const std::string& ref) {
-    std::string name = ref;
-    size_t pos = ref.find('_');
+    std::string r = trim(ref);
+    std::string name = r;
+    size_t pos = r.find('_');
     if (pos != std::string::npos) {
-        name = ref.substr(pos + 1);
+        name = r.substr(pos + 1);
     }
     std::string part = "./downloads/" + name + ".part";
     std::string final = "./downloads/" + name;
@@ -411,9 +422,9 @@ void downloadFile(TcpClient& client, const std::string& ref) {
         offset = static_cast<uint64_t>(st.st_size);
     }
     pushOpt("\033[A\033[K\033[A\033[K\033[A\033[K\033[A");
-    pushOpt(GREEN "正在下载文件: " + ref + RESET);
+    pushOpt(GREEN "正在下载文件: " + r + RESET);
     std::string data;
-    int status = f_download(g_host, ref, offset, data, showProgress);
+    int status = f_download(g_host, r, offset, data, showProgress);
     fprintf(stderr, "\n");
     pushOpt("\033[A\033[K\033[A");
     if (status == 1) {

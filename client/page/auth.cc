@@ -176,6 +176,7 @@ void codeSignIn(TcpClient& client) {
             }
             continue;
         }
+        pushOpt("\033[A\033[K\033[A");
         setPrompt("验证码已发送，请输入验证码:");
         setPrefix("验证码:");
         std::string code = popIpt();
