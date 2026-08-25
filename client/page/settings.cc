@@ -42,6 +42,7 @@ void changePassword(TcpClient& client) {
     pushOpt("======================");
     setPrompt("请输入新密码:");
     setPrefix("新密码:");
+    g_hide_echo = true;
     std::string password = popIpt();
     json req;
     req["type"] = 3;

@@ -89,6 +89,7 @@ void signUp(TcpClient& client) {
         std::string name = popIpt();
         setPrompt("请输入密码:");
         setPrefix("密码:");
+        g_hide_echo = true;
         std::string password = popIpt();
         if (!confirm("确定注册吗")) {
             return;
@@ -124,6 +125,7 @@ void passwordSignIn(TcpClient& client) {
         std::string email = popIpt();
         setPrompt("请输入密码:");
         setPrefix("密码:");
+        g_hide_echo = true;
         std::string password = popIpt();
         if (!confirm("确定登录吗")) {
             return;

@@ -33,6 +33,7 @@ extern std::mutex g_ui_mutex;
 extern std::string g_prompt;
 extern std::string g_prefix;
 extern std::atomic<bool> g_is_getline;
+extern std::atomic<bool> g_hide_echo;
 extern std::atomic<int> g_chat;
 extern json g_user;
 extern TcpClient* g_client;

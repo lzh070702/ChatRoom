@@ -393,7 +393,7 @@ void uploadFile(TcpClient& client, const std::string& arg) {
         }
         ref = std::string(rsp["msg"]);
     }
-    pushOpt("\033[A\033[K\033[A\033[K\033[A\033[K\033[A");
+    pushOpt("\033[A\033[K\033[A\033[K\033[A");
     pushOpt("我: [文件] " + ref);
     int status = f_upload(g_host, ref, path, showProgress);
     fprintf(stderr, "\n");

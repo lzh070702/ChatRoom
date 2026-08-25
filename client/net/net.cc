@@ -56,6 +56,16 @@ void netLoop(TcpClient* client) {
     close(epfd);
 }
 
+// 密码输入时隐藏回显：接管 readline 默认 redisplay，g_hide_echo 为真时只清行、不回显输入
+static void noEchoRedisplay() {
+    if (g_hide_echo) {
+        fprintf(rl_outstream, "\r\033[K");
+        fflush(rl_outstream);
+    } else {
+        rl_redisplay();
+    }
+}
+
 void ioLoop() {
     int epfd = epoll_create1(0);
     epoll_event ev{};
@@ -65,6 +75,7 @@ void ioLoop() {
     ev.data.fd = g_opt_efd;
     epoll_ctl(epfd, EPOLL_CTL_ADD, g_opt_efd, &ev);
     rl_callback_handler_install("", on_line);
+    rl_redisplay_function = noEchoRedisplay;
     epoll_event events[2];
     while (g_running) {
         int n = epoll_wait(epfd, events, 2, 100);
@@ -96,13 +107,13 @@ void on_line(char* input) {
         return;
     }
     std::string line(input);
-    if (line == "/getline") {
+    if (line == "/short") {
         g_is_getline = true;
         free(input);
         std::cout << "\033[A\033[K";
         return;
     }
-    if (line == "/readline") {
+    if (line == "/long") {
         g_is_getline = false;
         free(input);
         std::cout << "\033[A\033[K";
@@ -122,6 +133,7 @@ void on_line(char* input) {
         clearLines(line);
         printLine(line);
     }
+    g_hide_echo = false;
     free(input);
 }
 
@@ -177,7 +189,8 @@ void printLine(const std::string& line) {
         prompt = g_prompt;
         prefix = g_prefix;
     }
-    fprintf(rl_outstream, "\033[A\033[K%s %s\n", prefix.c_str(), line.c_str());
+    std::string display = g_hide_echo ? std::string(line.size(), '*') : line;
+    fprintf(rl_outstream, "\033[A\033[K%s %s\n", prefix.c_str(), display.c_str());
     if (g_chat != 0) {
         fprintf(rl_outstream, "%s\n", prompt.c_str());
     }
