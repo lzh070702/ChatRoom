@@ -2,6 +2,12 @@ CREATE DATABASE IF NOT EXISTS `chatroom`
 DEFAULT CHARSET utf8mb4
 COLLATE utf8mb4_unicode_ci;
 
+CREATE USER IF NOT EXISTS 'chatserver'@'localhost' IDENTIFIED BY '123456';
+CREATE USER IF NOT EXISTS 'chatserver'@'%' IDENTIFIED BY '123456';
+GRANT ALL PRIVILEGES ON `chatroom`.* TO 'chatserver'@'localhost';
+GRANT ALL PRIVILEGES ON `chatroom`.* TO 'chatserver'@'%';
+FLUSH PRIVILEGES;
+
 USE `chatroom`;
 
 CREATE TABLE IF NOT EXISTS `user` (
