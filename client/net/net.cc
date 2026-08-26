@@ -7,6 +7,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 
 #include "TcpClient.h"
@@ -66,6 +67,42 @@ static void noEchoRedisplay() {
     }
 }
 
+// 聊天指令补全：输入 / 开头时按 Tab 补全指令
+static char* dupStr(const char* s) {
+    size_t n = strlen(s) + 1;
+    char* p = static_cast<char*>(malloc(n));
+    if (p != nullptr) {
+        memcpy(p, s, n);
+    }
+    return p;
+}
+
+static char* chatCommandGen(const char* text, int state) {
+    static const char* commands[] = {"/q",   "/long", "/short",
+                                     "/put", "/get",  "/file"};
+    static int idx;
+    static size_t len;
+    if (state == 0) {
+        idx = 0;
+        len = strlen(text);
+    }
+    while (idx < static_cast<int>(sizeof(commands) / sizeof(commands[0]))) {
+        const char* name = commands[idx++];
+        if (strncmp(name, text, len) == 0) {
+            return dupStr(name);
+        }
+    }
+    return nullptr;
+}
+
+static char** chatCommandCompletion(const char* text, int start, int end) {
+    (void)end;
+    if (start == 0 && text[0] == '/') {
+        return rl_completion_matches(text, chatCommandGen);
+    }
+    return nullptr;
+}
+
 void ioLoop() {
     int epfd = epoll_create1(0);
     epoll_event ev{};
@@ -76,6 +113,7 @@ void ioLoop() {
     epoll_ctl(epfd, EPOLL_CTL_ADD, g_opt_efd, &ev);
     rl_callback_handler_install("", on_line);
     rl_redisplay_function = noEchoRedisplay;
+    rl_attempted_completion_function = chatCommandCompletion;
     epoll_event events[2];
     while (g_running) {
         int n = epoll_wait(epfd, events, 2, 100);
