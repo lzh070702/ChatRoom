@@ -285,7 +285,7 @@ void onechat(TcpClient& client, const json& f) {
             downloadFile(client, input.substr(5));
             continue;
         }
-        if (input == "/pending") {
+        if (input == "/file") {
             pendingFiles(client);
             continue;
         }
@@ -414,6 +414,41 @@ void downloadFile(TcpClient& client, const std::string& ref) {
     if (pos != std::string::npos) {
         name = r.substr(pos + 1);
     }
+    // 拉取当前会话的文件列表，校验 ref 是否属于本会话、是否已上传完成
+    int rid = g_chat / 2;
+    bool is_group = (g_chat % 2 == 1);
+    json req;
+    req["type"] = 27;
+    req["rid"] = rid;
+    req["is_group"] = is_group;
+    client.sendData(req.dump());
+    json rsp = popRsp();
+    if (!g_running) {
+        return;
+    }
+    bool found = false;
+    bool pending = false;
+    if (rsp["code"] == 1) {
+        for (auto& f : rsp["msg"]) {
+            if (std::string(f["ref"]) == r) {
+                found = true;
+                pending = f["upload_pending"].get<bool>();
+                break;
+            }
+        }
+    }
+    if (!found) {
+        pushOpt("\033[A\033[K\033[A\033[K\033[A");
+        pushOpt(RED + std::string("文件不存在") + RESET);
+        pushOpt("======================");
+        return;
+    }
+    if (pending) {
+        pushOpt("\033[A\033[K\033[A\033[K\033[A");
+        pushOpt(RED + std::string("文件未上传完成") + RESET);
+        pushOpt("======================");
+        return;
+    }
     std::string part = "./downloads/" + name + ".part";
     std::string final = "./downloads/" + name;
     uint64_t offset = 0;
@@ -466,25 +501,61 @@ void pendingFiles(TcpClient& client) {
         pushOpt("======================");
         return;
     }
-    bool any = false;
+    if ((rsp["msg"]).empty()) {
+        pushOpt(GREEN "当前聊天暂无文件" RESET);
+        pushOpt("======================");
+        return;
+    }
+    std::vector<json> pending_upload;
+    std::vector<json> pending_download;
+    std::vector<json> available;
     for (auto& f : rsp["msg"]) {
         std::string name = f["name"];
         std::string ref = f["ref"];
         if (f["upload_pending"].get<bool>()) {
-            any = true;
-            pushOpt(YELLOW + std::string("上传未完成: ") + name +
-                    std::string("  →  /put ") + ref + " <路径>" + RESET);
+            pending_upload.push_back(f);
+        } else {
+            available.push_back(f);
         }
         std::string part = "./downloads/" + name + ".part";
         struct stat st;
         if (stat(part.c_str(), &st) == 0) {
-            any = true;
-            pushOpt(YELLOW + std::string("下载未完成: ") + name +
-                    std::string("  →  /get ") + ref + RESET);
+            pending_download.push_back(f);
         }
     }
-    if (!any) {
-        pushOpt(GREEN + std::string("当前聊天无未完成的文件传输") + RESET);
+    if (!pending_upload.empty()) {
+        pushOpt(YELLOW "上传未完成: " RESET);
+        for (auto& f : pending_upload) {
+            std::string name = f["name"];
+            std::string ref = f["ref"];
+            if (f["upload_pending"].get<bool>()) {
+                pushOpt(YELLOW + name + std::string("  →  /put ") + ref +
+                        " <路径>" + RESET);
+            }
+        }
+    }
+    if (!pending_download.empty()) {
+        pushOpt(YELLOW "下载未完成: " RESET);
+        for (auto& f : pending_download) {
+            std::string name = f["name"];
+            std::string ref = f["ref"];
+            std::string part = "./downloads/" + name + ".part";
+            struct stat st;
+            if (stat(part.c_str(), &st) == 0) {
+                pushOpt(YELLOW + name + std::string("  →  /get ") + ref +
+                        RESET);
+            }
+        }
+    }
+    if (!available.empty()) {
+        pushOpt(GREEN "可下载文件: " RESET);
+        for (auto& f : available) {
+            std::string name = f["name"];
+            std::string ref = f["ref"];
+            if (!f["upload_pending"].get<bool>()) {
+                pushOpt(GREEN + ref + RESET);
+            }
+        }
     }
     pushOpt("======================");
 }
