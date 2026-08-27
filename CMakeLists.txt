@@ -61,11 +61,11 @@ add_executable(web web/main.cc)
 target_include_directories(web PRIVATE web)
 target_link_libraries(web PRIVATE Threads::Threads)
 
-add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/index.html
+add_custom_command(OUTPUT ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/index.html
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_CURRENT_SOURCE_DIR}/web/index.html
-        ${CMAKE_BINARY_DIR}/index.html
+        ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/index.html
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/web/index.html
-    COMMENT "Copy index.html into build directory"
+    COMMENT "Copy index.html into bin directory"
 )
-add_custom_target(web_assets ALL DEPENDS ${CMAKE_BINARY_DIR}/index.html)
+add_custom_target(web_assets ALL DEPENDS ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/index.html)

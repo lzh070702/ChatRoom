@@ -281,6 +281,14 @@ const App = {
   heartbeatTimer: null,
   reconnectTimer: null,
 
+  // ── 文件传输运行时状态 ───────────
+  _sendingFile: false,   // 是否有文件正在发送（阻塞并发）
+  _pendingFile: null,    // 等待 code:4 的文件 {type, rid, file, name, ref?}
+  _fileOp: null,         // 'upload' | 'download' | null
+  _fileActive: false,    // 是否处于 @FILE|R| 与 @FILE|E| 之间
+  _fileChunks: [],       // 累积的二进制字节
+  _dlName: null,         // 下载时的原始文件名
+
   // ── 连接 ───────────────────────────
   connect(url) {
     this.url = url || document.getElementById('ws-url').value.trim();
@@ -290,6 +298,7 @@ const App = {
     document.getElementById('connect-btn').disabled = true;
     try { this.ws = new WebSocket(this.url); }
     catch (e) { this.showLoginMsg('地址格式错误', 'err'); return; }
+    this.ws.binaryType = 'arraybuffer';
 
     this.ws.onopen = () => {
       this.showLoginMsg('已连接', 'ok');
@@ -309,12 +318,14 @@ const App = {
     this.ws.onerror = () => { this.showLoginMsg('连接错误', 'err'); };
     this.ws.onmessage = (e) => {
       const d = e.data;
-      if (typeof d === 'string' && d.indexOf('@TST|') === 0) {
-        this.onChunkMessage(d);
+      if (typeof d === 'string') {
+        if (d.indexOf('@FILE|') === 0) { this.onFileMarker(d); return; }
+        try { this.dispatch(JSON.parse(d)); }
+        catch (_) { console.log('raw:', d); }
         return;
       }
-      try { this.dispatch(JSON.parse(d)); }
-      catch (_) { console.log('raw:', d); }
+      // 二进制帧：文件数据（8001 响应，经 transit 原样转发）
+      this.onFileBinary(d);
     };
   },
 
@@ -433,7 +444,10 @@ const App = {
         break;
       case 13: // 私聊
         if (d.code === 2) this.onFriendPush(d);
-        else if (d.code !== 1) this.notify(d.msg || '发送失败', 'err');
+        else if (d.code === 4) this.onFileReady(d);
+        else if (d.code === 3) this.onFileFail();
+        else if (d.code === 1) { /* 文本发送成功，本地已回显 */ }
+        else this.notify(d.msg || '发送失败', 'err');
         break;
       case 14: // 私聊历史
         if (d.code === 1) this.onFriendHistory(d);
@@ -478,14 +492,17 @@ const App = {
         break;
       case 25: // 群聊
         if (d.code === 2) this.onGroupPush(d);
-        else if (d.code !== 1) this.notify(d.msg || '发送失败', 'err');
+        else if (d.code === 4) this.onFileReady(d);
+        else if (d.code === 3) this.onFileFail();
+        else if (d.code === 1) { /* 文本发送成功，本地已回显 */ }
+        else this.notify(d.msg || '发送失败', 'err');
         break;
       case 26: // 群历史
         if (d.code === 1) this.onGroupHistory(d);
         break;
-      case 27: // 拉取文件
-        if (d.code === 1) this.saveFile(d.msg, d.file_data);
-        else this.notify(d.msg || '文件不存在', 'err');
+      case 27: // 拉取文件（pendingFiles）
+        if (d.code === 1) this.onPendingFiles(d);
+        else this.notify(d.msg || '获取文件列表失败', 'err');
         break;
       default: console.log('unhandled type:', d.type, d);
     }
@@ -547,7 +564,7 @@ const App = {
       case 18: return (m.msg || '') + (m.name || '');
       case 19: return (m.msg || '');
       case 25: {
-        const s = m.sender_name || '';
+        const s = m.name || '';
         return m.msg_type ? s + ' 在群聊' + (m.group_name || '') + '发来一个文件'
                           : s + ' 在群聊' + (m.group_name || '') + '发来一条消息';
       }
@@ -559,8 +576,8 @@ const App = {
     const text = this.formatUnread(m);
     if (!text) return;
     const entry = {type: m.type, text};
-    if (m.type === 13) { entry.chatType = 'friend'; entry.chatId = m.id; entry.chatName = m.name; }
-    else if (m.type === 25) { entry.chatType = 'group'; entry.chatId = m.group_id; entry.chatName = m.group_name; }
+    if (m.type === 13) { entry.chatType = 'friend'; entry.chatId = m.sid; entry.chatName = m.name; }
+    else if (m.type === 25) { entry.chatType = 'group'; entry.chatId = m.rid; entry.chatName = m.group_name; }
     this.unread.push(entry);
     this.renderUnreadBadge();
     // 若当前正查看未读页，实时刷新
@@ -605,16 +622,16 @@ const App = {
   // ── 私聊 / 群聊推送 ─────────────────
   onFriendPush(d) {
     const isFile = !!d.msg_type;
-    if (this.chatSession && this.chatSession.type === 'friend' && this.chatSession.id === d.id) {
-      this.appendChatMsg('friend_' + d.id, {self:false, txt:d.msg, isFile, senderId:d.id, senderName:d.name, fileRef:d.msg, downloadable:isFile});
+    if (this.chatSession && this.chatSession.type === 'friend' && this.chatSession.id === d.sid) {
+      this.appendChatMsg('friend_' + d.sid, {self:false, txt:d.msg, isFile, senderId:d.sid, senderName:d.name, fileRef:d.msg, downloadable:isFile});
     } else {
       this.addUnread(d);
     }
   },
   onGroupPush(d) {
     const isFile = !!d.msg_type;
-    if (this.chatSession && this.chatSession.type === 'group' && this.chatSession.id === d.group_id) {
-      this.appendChatMsg('group_' + d.group_id, {self:false, txt:d.msg, isFile, senderId:d.sender_id, senderName:d.sender_name, fileRef:d.msg, downloadable:isFile});
+    if (this.chatSession && this.chatSession.type === 'group' && this.chatSession.id === d.rid) {
+      this.appendChatMsg('group_' + d.rid, {self:false, txt:d.msg, isFile, senderId:d.sid, senderName:d.name, fileRef:d.msg, downloadable:isFile});
     } else {
       this.addUnread(d);
     }
@@ -867,6 +884,7 @@ const App = {
       inputHtml = `<div class="input-area">
         <div class="input-toolbar">
           <button onclick="document.getElementById('file-input').click()">📎 发送文件</button>
+          <button onclick="App.openFiles()">📁 文件列表</button>
           <input type="file" id="file-input" style="display:none" onchange="App.sendFile(this)">
         </div>
         <textarea id="msg-input" placeholder="输入消息，Enter 发送" oninput="App.onMsgInput()" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();App.sendMsg();}"></textarea>
@@ -979,8 +997,8 @@ const App = {
     if (!txt) return;
     if (this.utf8ByteLen(txt) > 65535) { this.onMsgInput(); return; }
     input.value = '';
-    if (t.type === 'friend') this.send({type:13, id: t.id, msg: txt, msg_type: false});
-    else this.send({type:25, group_id: t.id, msg: txt, msg_type: false});
+    if (t.type === 'friend') this.send({type:13, rid: t.id, msg: txt, msg_type: false});
+    else this.send({type:25, rid: t.id, msg: txt, msg_type: false});
     this.appendChatMsg((t.type === 'friend' ? 'friend_' : 'group_') + t.id,
       {self:true, txt, time:new Date().toLocaleTimeString(), isFile:false, senderId:this.user.id, senderName:this.user.name});
   },
@@ -990,84 +1008,186 @@ const App = {
     const file = input.files[0];
     input.value = '';
     if (this._sendingFile) { this.alertError('有文件正在发送，请稍候'); return; }
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) { this.alertError('未连接，正在重连中'); return; }
     this._sendingFile = true;
+    this._pendingFile = { type: t.type, rid: t.id, file, name: file.name };
     this.notify('正在发送 ' + file.name + '（' + (file.size / 1024 / 1024).toFixed(1) + ' MB）...');
-    (async () => {
-      try {
-        // 构造后端期望的 JSON，file_data 占位为空，随后分块流式填充
-        const obj = (t.type === 'friend')
-          ? {type:13, id: t.id, msg: file.name, msg_type: true, file_data: ''}
-          : {type:25, group_id: t.id, msg: file.name, msg_type: true, file_data: ''};
-        const s = JSON.stringify(obj);
-        const k = s.indexOf('"file_data":"');
-        if (k < 0) throw new Error('内部错误：未定位到 file_data');
-        const head = s.slice(0, k + 13);  // 含 file_data 起始引号
-        const tail = s.slice(k + 13);      // 从空值结束引号到结尾
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-          throw new Error('未连接，正在重连中');
-        }
-        this.ws.send('@TST|UB|' + head);
-        // 分块必须是 3 的倍数：transit 对每个块独立 base64 编码后拼接，
-        // 3 的倍数保证中间块不带 '=' 填充（只有末块在末尾正确填充）。
-        const CH = 3 * 1024 * 1024;
-        for (let off = 0; off < file.size; off += CH) {
-          const buf = await file.slice(off, off + CH).arrayBuffer();
-          this.ws.send(buf);
-        }
-        this.ws.send('@TST|UE|' + tail);
-        this.appendChatMsg((t.type === 'friend' ? 'friend_' : 'group_') + t.id,
-          {self:true, txt: file.name, time:new Date().toLocaleTimeString(), isFile:true, senderId:this.user.id, senderName:this.user.name, downloadable:false});
-        console.log('[sendFile] 已发送', file.name, file.size);
-      } catch (e) {
-        console.error('[sendFile] 异常', e);
-        this.alertError('文件发送异常：' + (e.message || e));
-      } finally {
-        this._sendingFile = false;
-      }
-    })();
+    // 先发文件消息 JSON（无 file_data），服务端建 file_id 后回 code:4 + ref，再走 8001 上传字节
+    if (t.type === 'friend') this.send({type:13, rid: t.id, msg: file.name, msg_type: true});
+    else this.send({type:25, rid: t.id, msg: file.name, msg_type: true});
   },
-  // 分块下载重组：transit 把大文件响应拆成 @TST|DS/DD/DE 三段式下发
-  onChunkMessage(d) {
-    const op = d.slice(5, 7);   // DS / DD / DE
-    const body = d.slice(8);
-    if (op === 'DS') {
-      let meta;
-      try { meta = JSON.parse(body); }
-      catch (e) { console.error('[chunk] 解析元数据失败', e); return; }
-      this._dl = { name: String(meta.msg || '').replace(/^\d+_/, '') || 'download', bytes: [] };
-      this.notify('正在接收文件 ' + this._dl.name + ' ...');
-    } else if (op === 'DD') {
-      if (!this._dl) return;
-      try {
-        const bin = atob(body);
-        const arr = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-        this._dl.bytes.push(arr);
-      } catch (e) { console.error('[chunk] 解码块失败', e); }
-    } else if (op === 'DE') {
-      if (!this._dl) return;
-      const blob = new Blob(this._dl.bytes);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = this._dl.name;
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
-      this.notify('文件下载完成：' + this._dl.name);
-      this._dl = null;
+  // ── 文件传输（8001 二进制协议，经 transit @FILE| 标记路由）──────
+  buildFileHeader(cmd, filename, size, offset) {
+    const fn = new TextEncoder().encode(filename);
+    const ab = new ArrayBuffer(28 + fn.length);
+    const dv = new DataView(ab);
+    dv.setUint8(0, 0x46); dv.setUint8(1, 0x49); dv.setUint8(2, 0x4C); dv.setUint8(3, 0x45); // "FILE"
+    dv.setUint8(4, cmd);                            // 1 上传 / 2 下载
+    dv.setUint8(5, 0);                              // flags
+    dv.setUint8(6, 0);                              // reserved
+    dv.setUint8(7, 1);                              // version
+    dv.setUint32(8, fn.length, false);              // filename_len 大端
+    dv.setBigUint64(12, BigInt(size || 0), false);  // file_size 大端
+    dv.setBigUint64(20, BigInt(offset || 0), false);// offset 大端
+    new Uint8Array(ab, 28, fn.length).set(fn);
+    return ab;
+  },
+
+  parseFileHeader(ab) {
+    const dv = new DataView(ab);
+    return {
+      magic: String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3)),
+      cmd: dv.getUint8(4),
+      status: dv.getUint8(5),
+      offset: dv.getBigUint64(8, false),
+      total: dv.getBigUint64(16, false),
+    };
+  },
+
+  // transit 下发的 @FILE|R| / @FILE|E| 标记
+  onFileMarker(txt) {
+    if (txt === '@FILE|R|') {
+      this._fileActive = true;
+      this._fileChunks = [];
+      return;
+    }
+    if (txt === '@FILE|E|') {
+      this._fileActive = false;
+      const buf = this.concatChunks(this._fileChunks);
+      this._fileChunks = [];
+      const op = this._fileOp;
+      this._fileOp = null;
+      if (op === 'upload') this.onUploadDone(buf);
+      else if (op === 'download') this.onDownloadDone(buf);
+      return;
     }
   },
-  downloadFile(ref) { this.send({type:27, msg: ref}); },
-  saveFile(name, b64) {
-    const realName = String(name).replace(/^\d+_/, '');
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    const blob = new Blob([bytes]);
+
+  // transit 转发的 8001 二进制字节
+  onFileBinary(ab) {
+    if (this._fileActive) {
+      this._fileChunks.push(new Uint8Array(ab));
+    }
+  },
+
+  concatChunks(chunks) {
+    let total = 0;
+    chunks.forEach(c => total += c.length);
+    const out = new Uint8Array(total);
+    let off = 0;
+    chunks.forEach(c => { out.set(c, off); off += c.length; });
+    return out.buffer;
+  },
+
+  // 上传完成：解析 24B 响应头，标记已发送
+  onUploadDone(buf) {
+    const p = this._pendingFile;
+    if (buf.byteLength < 24) {
+      this.alertError('上传响应异常');
+      this._pendingFile = null; this._sendingFile = false;
+      return;
+    }
+    const h = this.parseFileHeader(buf);
+    if (h.status !== 0) {
+      this.alertError('文件上传失败（状态码 ' + h.status + '）');
+    } else if (p) {
+      this.appendChatMsg((p.type === 'friend' ? 'friend_' : 'group_') + p.rid,
+        {self:true, txt:p.name, time:new Date().toLocaleTimeString(), isFile:true,
+         senderId:this.user.id, senderName:this.user.name, downloadable:false});
+      this.notify('文件已发送：' + p.name);
+    }
+    this._pendingFile = null;
+    this._sendingFile = false;
+  },
+
+  // 下载完成：解析 24B 响应头，取出文件字节并保存
+  onDownloadDone(buf) {
+    if (buf.byteLength < 24) {
+      this.alertError('下载响应异常');
+      return;
+    }
+    const h = this.parseFileHeader(buf);
+    if (h.status !== 0) {
+      this.alertError('文件下载失败（状态码 ' + h.status + '）');
+      return;
+    }
+    const data = buf.slice(24);
+    const name = this._dlName || 'download';
+    this._dlName = null;
+    const blob = new Blob([data]);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = realName || 'download';
+    a.href = url; a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
+    this.notify('文件下载完成：' + name);
+  },
+
+  // 文件发送成功（code:4）：拿到 ref，开始上传字节到 8001
+  onFileReady(d) {
+    const p = this._pendingFile;
+    if (!p) return;
+    p.ref = d.msg;  // ref = "<file_id>_<文件名>"
+    this.uploadFileBytes(p);
+  },
+
+  // 文件发送失败（code:3，具体原因已由 code:0 提示过）：仅清理
+  onFileFail() {
+    this._pendingFile = null;
+    this._sendingFile = false;
+  },
+
+  // 实际字节上传：@FILE|U| + [28B头 + ref] + 文件分片
+  async uploadFileBytes(p) {
+    this._fileOp = 'upload';
+    const header = this.buildFileHeader(1, p.ref, p.file.size, 0);
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      this.alertError('未连接，正在重连中');
+      this._pendingFile = null; this._sendingFile = false; this._fileOp = null;
+      return;
+    }
+    this.ws.send('@FILE|U|');
+    this.ws.send(header);
+    const CH = 1024 * 1024;  // 1MB 分片
+    for (let off = 0; off < p.file.size; off += CH) {
+      const buf = await p.file.slice(off, off + CH).arrayBuffer();
+      this.ws.send(buf);
+    }
+  },
+
+  // 下载文件：@FILE|D| + [28B头 + ref]；ref 去掉 "<file_id>_" 前缀得原名
+  downloadFile(ref) {
+    if (!ref) return;
+    if (this._fileOp) { this.alertError('已有文件传输进行中，请稍候'); return; }
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) { this.alertError('未连接，正在重连中'); return; }
+    const s = String(ref);
+    const pos = s.indexOf('_');
+    const name = pos >= 0 ? s.substr(pos + 1) : s;
+    this._fileOp = 'download';
+    this._dlName = name;
+    this.notify('正在下载 ' + name + ' ...');
+    this.ws.send('@FILE|D|');
+    this.ws.send(this.buildFileHeader(2, s, 0, 0));
+  },
+
+  // type 27（pendingFiles）：拉取当前会话文件列表
+  openFiles() {
+    const t = this.historyTarget;
+    if (!t || this.historyReadonly) return;
+    if (t.type === 'friend') this.send({type:27, rid: t.id, is_group: false});
+    else this.send({type:27, rid: t.id, is_group: true});
+  },
+  onPendingFiles(d) {
+    const files = d.msg || [];
+    if (files.length === 0) { this.alertInfo('暂无文件记录'); return; }
+    const rows = files.map(f => {
+      const tag = f.upload_pending ? '<span style="color:#faad14">（上传未完成）</span>' : '';
+      return `<div class="invite-friend" style="display:flex;align-items:center;justify-content:space-between">
+        <span>📎 ${this.esc(f.name)} ${tag}</span>
+        <button class="btn2" onclick="App.downloadFile('${this.escAttr(f.ref)}')">下载</button>
+      </div>`;
+    }).join('');
+    this.showModal('文件列表', rows, null, true);
   },
   // ── 好友操作 ───────────────────────
   openFriendMenu(id) {
