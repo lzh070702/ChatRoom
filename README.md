@@ -192,10 +192,8 @@ cd bin
 # 指定地址/端口
 ./client <host> <port>
 
-# 或使用完网页端(同时支持 cli 和 web )
-# 访问浏览器
-# 例: http://10.30.0.159:8000
-# 连接: ws://10.30.0.159:10000
+# 网页端(可以同时支持cli和web)：启动 ./web 后，浏览器访问 http://<server-ip>:9000/index.html
+# WebSocket 连接地址：ws://<server-ip>:10000
 ```
 
 
